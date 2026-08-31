@@ -3,10 +3,17 @@ from __future__ import annotations
 import tempfile
 import unittest
 from collections import Counter
+from contextlib import redirect_stderr
 from copy import deepcopy
+from io import StringIO
 from pathlib import Path
 
-from smp_meso_bindings import build_binary, run_batch, run_batch_parallel
+from smp_meso_bindings import (
+    build_binary,
+    print_progress,
+    run_batch,
+    run_batch_parallel,
+)
 
 
 def request(request_id: str, layer: str, seed: int) -> dict[str, object]:
@@ -164,6 +171,24 @@ for batch_index, line in enumerate(sys.stdin, 1):
             {event["request_id"]: event["request_index"] for event in started},
             {"slow": 1, "fast-1": 2, "fast-2": 3, "fast-3": 4},
         )
+
+    def test_progress_printer_includes_process_and_failure_detail(self) -> None:
+        output = StringIO()
+        with redirect_stderr(output):
+            print_progress(
+                {
+                    "event": "request_failed",
+                    "request_id": "broken",
+                    "request_index": 2,
+                    "request_total": 4,
+                    "process_index": 1,
+                    "process_total": 2,
+                    "message": "numerical invariant failed",
+                }
+            )
+        rendered = output.getvalue()
+        self.assertIn("[2/4 p1]", rendered)
+        self.assertIn("numerical invariant failed", rendered)
 
 
 if __name__ == "__main__":

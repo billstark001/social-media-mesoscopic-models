@@ -408,6 +408,8 @@ def print_progress(event: Mapping[str, Any]) -> None:
         )
     elif kind.startswith("scenario_"):
         detail = f"scenario {event.get('scenario_index')}/{event.get('scenario_count')}"
+    elif kind in {"request_rejected", "request_failed"}:
+        detail = f"{kind}: {event.get('message', '<no detail>')}"
     else:
         detail = kind
     elapsed = float(event.get("elapsed_seconds", 0.0))
