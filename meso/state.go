@@ -277,11 +277,11 @@ func (s *State) rebuildScoreState(availabilityCorrelation float64) {
 		}
 	}
 	if s.Layer >= LayerWedge {
-		s.rebuildWedge(adjacency)
+		s.rebuildWedge(adjacency, availabilityCorrelation)
 	}
 }
 
-func (s *State) rebuildWedge(adjacency []float64) {
+func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float64) {
 	clear(s.Wedge)
 	for center := 0; center < s.Bins; center++ {
 		if s.Rho[center] <= numerics.ProbabilityEpsilon {
@@ -333,8 +333,9 @@ func (s *State) rebuildWedge(adjacency []float64) {
 				// uncensored analytic mean here would make W and S_1 disagree by
 				// exactly the mass accumulated in the last score bin.
 				pmf := numerics.PoissonPMF(s.scoreMean(i, j, adjacency), s.ScoreMax)
-				for score, probability := range pmf {
-					firstMoment += pairMass * availableFraction * probability * float64(score)
+				available := availabilityByScore(pmf, availableFraction, availabilityCorrelation)
+				for score, mass := range available {
+					firstMoment += pairMass * mass * float64(score)
 				}
 			}
 			current := 0.0
@@ -580,6 +581,13 @@ func (s *State) Validate() error {
 			}
 		}
 	}
+	if err := s.validateWedgeProjection(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *State) validateWedgeProjection() error {
 	if s.Layer >= LayerWedge {
 		for i := 0; i < s.Bins; i++ {
 			for j := 0; j < s.Bins; j++ {

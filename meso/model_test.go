@@ -163,3 +163,26 @@ func TestZeroWeightedLossFallsBackWithoutBreakingEdgeConservation(t *testing.T) 
 		t.Fatalf("invalid fallback loss sample %v", loss)
 	}
 }
+
+func TestExtremeClosureProfilesInitializeAllLayers(t *testing.T) {
+	profiles := []ClosureProfile{
+		{EligibilityCorrelation: 1}, {EligibilityCorrelation: -1},
+		{ScoreAvailability: 1}, {ScoreAvailability: -1},
+		{MotifPersistence: 1}, {MotifPersistence: -1},
+		{BridgeBias: 1}, {BridgeBias: -1},
+		{ComponentMix: 1}, {ComponentMix: -1},
+	}
+	for _, layer := range []Layer{LayerBase, LayerWedge, LayerHistogram, LayerCandidate, LayerTopology} {
+		for profileIndex, profile := range profiles {
+			request := testRequest()
+			request.Recommender.Steepness = 1
+			_, err := InitialState(
+				request, layer, profile,
+				rand.New(rand.NewPCG(uint64(500+profileIndex), uint64(600+layer))),
+			)
+			if err != nil {
+				t.Fatalf("layer=%s profile=%+v: %v", layer.String(), profile, err)
+			}
+		}
+	}
+}
