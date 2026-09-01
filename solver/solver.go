@@ -8,12 +8,17 @@ import (
 )
 
 type PointEstimate struct {
-	Paths              int       `json:"paths"`
-	Counts             []int     `json:"counts"`
-	Probabilities      []float64 `json:"probabilities"`
-	MeanSteps          float64   `json:"mean_steps"`
-	MeanRewiringEvents float64   `json:"mean_rewiring_events"`
-	ConvergedPaths     int       `json:"converged_paths"`
+	Paths                  int       `json:"paths"`
+	Counts                 []int     `json:"counts"`
+	Probabilities          []float64 `json:"probabilities"`
+	MeanSteps              float64   `json:"mean_steps"`
+	MeanRewiringEvents     float64   `json:"mean_rewiring_events"`
+	ConvergedPaths         int       `json:"converged_paths"`
+	FastSlowAppliedPaths   int       `json:"fast_slow_applied_paths"`
+	MeanFastSubsteps       float64   `json:"mean_fast_substeps"`
+	MeanFastRewiringEvents float64   `json:"mean_fast_rewiring_events"`
+	FastMaxHits            int       `json:"fast_max_hits"`
+	MeanFinalFastResidual  float64   `json:"mean_final_fast_residual"`
 }
 
 type Diagnostics struct {
@@ -21,6 +26,7 @@ type Diagnostics struct {
 	StateDimension int     `json:"state_dimension"`
 	ElapsedSeconds float64 `json:"elapsed_seconds"`
 	IntervalKind   string  `json:"interval_kind"`
+	Decomposition  string  `json:"decomposition"`
 }
 
 type Result struct {
@@ -86,13 +92,19 @@ func RunWithProgress(
 		Point: PointEstimate{
 			Paths: point.Paths, Counts: point.Counts, Probabilities: point.Probabilities,
 			MeanSteps: point.MeanSteps, MeanRewiringEvents: point.MeanRewiringEvents,
-			ConvergedPaths: point.ConvergedPaths,
+			ConvergedPaths:         point.ConvergedPaths,
+			FastSlowAppliedPaths:   point.FastSlowAppliedPaths,
+			MeanFastSubsteps:       point.MeanFastSubsteps,
+			MeanFastRewiringEvents: point.MeanFastRewiringEvents,
+			FastMaxHits:            point.FastMaxHits,
+			MeanFinalFastResidual:  point.MeanFinalFastResidual,
 		},
 		Interval: interval,
 		Diagnostics: Diagnostics{
 			Backend: numerics.ActiveBackend.Name(), StateDimension: point.StateDimension,
 			ElapsedSeconds: time.Since(started).Seconds(),
 			IntervalKind:   "closure-envelope; not a certified continuum robust optimum",
+			Decomposition:  request.FastSlow.Mode,
 		},
 	}
 	emit(ProgressEvent{

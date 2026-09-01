@@ -18,7 +18,9 @@ func solverRequest() config.RunRequest {
 		Initial:     config.InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
 		Resolution:  config.ResolutionConfig{ScoreMax: 6, AvailabilityBins: 4, ComponentSizeBins: 4, OpinionQuadrature: 3},
 		Closure:     config.ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
-		Ambiguity:   config.AmbiguityConfig{EligibilityCorrelationRadius: 0.5, ScoreAvailabilityRadius: 0.5, MotifPersistenceRadius: 0.5, BridgeBiasRadius: 0.5, ComponentMixRadius: 0.5},
+		FastSlow: config.FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
+			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
+		Ambiguity: config.AmbiguityConfig{EligibilityCorrelationRadius: 0.5, ScoreAvailabilityRadius: 0.5, MotifPersistenceRadius: 0.5, BridgeBiasRadius: 0.5, ComponentMixRadius: 0.5},
 	}
 }
 
@@ -68,6 +70,29 @@ func TestRetainedLayersRemoveAmbiguityCoordinates(t *testing.T) {
 			t.Fatalf("layer %s has %d active coordinates after %d", layer.String(), count, previous)
 		}
 		previous = count
+	}
+}
+
+func TestNaiveAndFastSlowDiagnostics(t *testing.T) {
+	request := solverRequest()
+	request.Layer = "naive"
+	request.FastSlow.Mode = "conditional_absorption"
+	request.FastSlow.RatioThreshold = 1
+	request.FastSlow.MaxSubsteps = 20
+	request.Dynamics.Influence = 0.005
+	request.Dynamics.RewiringRate = 0.3
+	result, err := Run(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Diagnostics.Decomposition != "conditional_absorption" {
+		t.Fatalf("unexpected decomposition diagnostics: %+v", result.Diagnostics)
+	}
+	if result.Diagnostics.StateDimension != request.OpinionBins+request.OpinionBins*request.OpinionBins {
+		t.Fatalf("naive state dimension=%d", result.Diagnostics.StateDimension)
+	}
+	if result.Point.FastSlowAppliedPaths != request.Paths || result.Point.MeanFastSubsteps <= 0 {
+		t.Fatalf("missing fast-slow path diagnostics: %+v", result.Point)
 	}
 }
 

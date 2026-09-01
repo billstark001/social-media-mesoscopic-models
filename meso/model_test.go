@@ -3,10 +3,118 @@ package meso
 import (
 	"math"
 	"math/rand/v2"
+	"reflect"
 	"smp-meso/config"
 	"smp-meso/numerics"
 	"testing"
 )
+
+func TestNaiveRetainsOnlyRhoAndEdge(t *testing.T) {
+	request := testRequest()
+	profile := ClosureProfile{ScoreAvailability: 0.4}
+	state, err := InitialState(request, LayerNaive, profile, rand.New(rand.NewPCG(31, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := state.Dimension(), state.Bins+state.Bins*state.Bins; got != want {
+		t.Fatalf("naive dimension=%d want rho+E=%d", got, want)
+	}
+	if _, err := Step(state, request, profile, rand.New(rand.NewPCG(33, 34))); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := independentTarget(state, request, profile, state.Edge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(state.Candidate, fresh.Candidate) || !reflect.DeepEqual(state.Score, fresh.Score) {
+		t.Fatal("naive recommendation caches were not reconstructed from current rho/E")
+	}
+}
+
+func TestFastSlowFallsBackBelowRatioThreshold(t *testing.T) {
+	request := testRequest()
+	request.FastSlow.Mode = "conditional_absorption"
+	request.FastSlow.RatioThreshold = 10
+	left, err := InitialState(request, LayerBase, ClosureProfile{}, rand.New(rand.NewPCG(41, 42)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	right := left.Clone()
+	leftDiagnostics, err := Step(left, request, ClosureProfile{}, rand.New(rand.NewPCG(43, 44)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightDiagnostics, err := FastSlowStep(right, request, ClosureProfile{}, rand.New(rand.NewPCG(43, 44)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(left, right) || !reflect.DeepEqual(leftDiagnostics, rightDiagnostics) {
+		t.Fatal("below-threshold fast-slow route did not exactly reuse unsplit step")
+	}
+}
+
+func TestFastSlowFreezesRhoDuringConditionalRewiring(t *testing.T) {
+	request := testRequest()
+	request.FastSlow.Mode = "conditional_absorption"
+	request.FastSlow.RatioThreshold = 1
+	request.FastSlow.MaxSubsteps = 40
+	request.Dynamics.Influence = 0
+	request.Dynamics.RewiringRate = 0.3
+	state, err := InitialState(request, LayerNaive, ClosureProfile{}, rand.New(rand.NewPCG(51, 52)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := append([]float64(nil), state.Rho...)
+	diagnostics, err := FastSlowStep(state, request, ClosureProfile{}, rand.New(rand.NewPCG(53, 54)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnostics.FastSlowApplied || diagnostics.FastSubsteps == 0 {
+		t.Fatalf("fast-slow projection was not applied: %+v", diagnostics)
+	}
+	if !reflect.DeepEqual(before, state.Rho) {
+		t.Fatal("rho changed despite zero-influence slow step")
+	}
+	if err := state.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFastSlowStepSupportsEveryLayer(t *testing.T) {
+	request := testRequest()
+	request.FastSlow.Mode = "conditional_absorption"
+	request.FastSlow.RatioThreshold = 1
+	request.FastSlow.MaxSubsteps = 4
+	request.FastSlow.ZeroEventBatches = 2
+	request.Dynamics.Influence = 0
+	request.Dynamics.RewiringRate = 0.3
+	for layer := LayerNaive; layer <= LayerTopology; layer++ {
+		state, err := InitialState(
+			request,
+			layer,
+			ClosureProfile{},
+			rand.New(rand.NewPCG(61+uint64(layer), 71+uint64(layer))),
+		)
+		if err != nil {
+			t.Fatalf("initialize layer %s: %v", layer, err)
+		}
+		diagnostics, err := FastSlowStep(
+			state,
+			request,
+			ClosureProfile{},
+			rand.New(rand.NewPCG(81+uint64(layer), 91+uint64(layer))),
+		)
+		if err != nil {
+			t.Fatalf("fast-slow layer %s: %v", layer, err)
+		}
+		if !diagnostics.FastSlowApplied {
+			t.Fatalf("fast-slow layer %s was not activated", layer)
+		}
+		if err := state.Validate(); err != nil {
+			t.Fatalf("validate layer %s: %v", layer, err)
+		}
+	}
+}
 
 func testRequest() config.RunRequest {
 	return config.RunRequest{
@@ -22,6 +130,8 @@ func testRequest() config.RunRequest {
 		Initial:    config.InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
 		Resolution: config.ResolutionConfig{ScoreMax: 8, AvailabilityBins: 5, ComponentSizeBins: 5, OpinionQuadrature: 3},
 		Closure:    config.ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
+		FastSlow: config.FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
+			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
 		Ambiguity: config.AmbiguityConfig{
 			EligibilityCorrelationRadius: 0.5, ScoreAvailabilityRadius: 0.5,
 			MotifPersistenceRadius: 0.5, BridgeBiasRadius: 0.5, ComponentMixRadius: 0.5,
@@ -29,10 +139,10 @@ func testRequest() config.RunRequest {
 	}
 }
 
-func TestFiveLayersInitializeAndIncreaseDimension(t *testing.T) {
+func TestSixLayersInitializeAndIncreaseDimension(t *testing.T) {
 	request := testRequest()
 	previous := 0
-	for layer := LayerBase; layer <= LayerTopology; layer++ {
+	for layer := LayerNaive; layer <= LayerTopology; layer++ {
 		rng := rand.New(rand.NewPCG(10+uint64(layer), 20+uint64(layer)))
 		state, err := InitialState(request, layer, ClosureProfile{}, rng)
 		if err != nil {
@@ -172,7 +282,7 @@ func TestExtremeClosureProfilesInitializeAllLayers(t *testing.T) {
 		{BridgeBias: 1}, {BridgeBias: -1},
 		{ComponentMix: 1}, {ComponentMix: -1},
 	}
-	for _, layer := range []Layer{LayerBase, LayerWedge, LayerHistogram, LayerCandidate, LayerTopology} {
+	for _, layer := range []Layer{LayerNaive, LayerBase, LayerWedge, LayerHistogram, LayerCandidate, LayerTopology} {
 		for profileIndex, profile := range profiles {
 			request := testRequest()
 			request.Recommender.Steepness = 1

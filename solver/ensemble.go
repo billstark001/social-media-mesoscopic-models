@@ -10,20 +10,30 @@ import (
 )
 
 type PathOutcome struct {
-	Category       int
-	Steps          int
-	RewiringEvents int
-	StateDimension int
+	Category           int
+	Steps              int
+	RewiringEvents     int
+	StateDimension     int
+	FastSlowApplied    bool
+	FastSubsteps       int
+	FastRewiringEvents int
+	FastMaxHits        int
+	FinalFastResidual  float64
 }
 
 type Ensemble struct {
-	Counts             []int
-	Probabilities      []float64
-	Paths              int
-	MeanSteps          float64
-	MeanRewiringEvents float64
-	ConvergedPaths     int
-	StateDimension     int
+	Counts                 []int
+	Probabilities          []float64
+	Paths                  int
+	MeanSteps              float64
+	MeanRewiringEvents     float64
+	ConvergedPaths         int
+	StateDimension         int
+	FastSlowAppliedPaths   int
+	MeanFastSubsteps       float64
+	MeanFastRewiringEvents float64
+	FastMaxHits            int
+	MeanFinalFastResidual  float64
 }
 
 func splitMix64(value uint64) uint64 {
@@ -52,25 +62,42 @@ func runPath(
 		return PathOutcome{Category: category, StateDimension: state.Dimension()}, nil
 	}
 	rewiringEvents := 0
+	fastSubsteps := 0
+	fastRewiringEvents := 0
+	fastMaxHits := 0
+	fastSlowApplied := false
+	finalFastResidual := 0.0
 	for step := 1; step <= request.MaxSteps; step++ {
-		diagnostics, err := meso.Step(state, request, profile, rng)
+		diagnostics, err := meso.FastSlowStep(state, request, profile, rng)
 		if err != nil {
 			return PathOutcome{}, fmt.Errorf("step %d: %w", step, err)
 		}
 		rewiringEvents += diagnostics.RewiringEvents
+		fastSubsteps += diagnostics.FastSubsteps
+		fastRewiringEvents += diagnostics.FastRewiringEvents
+		if diagnostics.FastMaxHit {
+			fastMaxHits++
+		}
+		fastSlowApplied = fastSlowApplied || diagnostics.FastSlowApplied
+		finalFastResidual = diagnostics.FastResidualIntensity
 		if progressStepInterval > 0 && step%progressStepInterval == 0 && onStep != nil {
 			onStep(step)
 		}
 		if category, terminal := terminalCategory(state, request); terminal {
 			return PathOutcome{
 				Category: category, Steps: step, RewiringEvents: rewiringEvents,
-				StateDimension: state.Dimension(),
+				StateDimension: state.Dimension(), FastSlowApplied: fastSlowApplied,
+				FastSubsteps: fastSubsteps, FastRewiringEvents: fastRewiringEvents,
+				FastMaxHits: fastMaxHits, FinalFastResidual: finalFastResidual,
 			}, nil
 		}
 	}
 	return PathOutcome{
 		Category: len(Categories) - 1, Steps: request.MaxSteps,
 		RewiringEvents: rewiringEvents, StateDimension: state.Dimension(),
+		FastSlowApplied: fastSlowApplied, FastSubsteps: fastSubsteps,
+		FastRewiringEvents: fastRewiringEvents, FastMaxHits: fastMaxHits,
+		FinalFastResidual: finalFastResidual,
 	}, nil
 }
 
@@ -165,6 +192,13 @@ func runEnsembleWithProgress(
 		result.Counts[outcome.Category]++
 		result.MeanSteps += float64(outcome.Steps)
 		result.MeanRewiringEvents += float64(outcome.RewiringEvents)
+		result.MeanFastSubsteps += float64(outcome.FastSubsteps)
+		result.MeanFastRewiringEvents += float64(outcome.FastRewiringEvents)
+		result.FastMaxHits += outcome.FastMaxHits
+		result.MeanFinalFastResidual += outcome.FinalFastResidual
+		if outcome.FastSlowApplied {
+			result.FastSlowAppliedPaths++
+		}
 		result.StateDimension = outcome.StateDimension
 		if outcome.Category != len(Categories)-1 {
 			result.ConvergedPaths++
@@ -172,6 +206,9 @@ func runEnsembleWithProgress(
 	}
 	result.MeanSteps /= float64(paths)
 	result.MeanRewiringEvents /= float64(paths)
+	result.MeanFastSubsteps /= float64(paths)
+	result.MeanFastRewiringEvents /= float64(paths)
+	result.MeanFinalFastResidual /= float64(paths)
 	for category, count := range result.Counts {
 		result.Probabilities[category] = float64(count) / float64(paths)
 	}

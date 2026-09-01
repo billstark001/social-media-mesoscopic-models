@@ -9,9 +9,14 @@ import (
 )
 
 type StepDiagnostics struct {
-	RewiringEvents int
-	ExpectedMoves  float64
-	MaxRhoChange   float64
+	RewiringEvents        int
+	ExpectedMoves         float64
+	MaxRhoChange          float64
+	FastSlowApplied       bool
+	FastSubsteps          int
+	FastRewiringEvents    int
+	FastMaxHit            bool
+	FastResidualIntensity float64
 }
 
 func correlatedIntersection(left, right, correlation float64) float64 {
@@ -257,6 +262,11 @@ func updateRewiredCoordinates(
 	centerChange []float64,
 	globalChange float64,
 ) {
+	if state.Layer == LayerNaive {
+		copy(state.Candidate, target.Candidate)
+		copy(state.Score, target.Score)
+		return
+	}
 	globalPersistence := adjustPersistence(math.Pow(1-globalChange, 2), profile.MotifPersistence)
 	var previousWedge []float64
 	if state.Layer >= LayerWedge {
@@ -329,6 +339,121 @@ func updateRewiredCoordinates(
 		numerics.MixInto(updatedBridges, state.Bridges, target.Bridges, weight)
 		state.Components, state.Bridges = updatedComponents, updatedBridges
 	}
+}
+
+func advanceOpinion(
+	state *State,
+	request config.RunRequest,
+	profile ClosureProfile,
+	transition, edgeBefore []float64,
+	rng *rand.Rand,
+) (StepDiagnostics, error) {
+	rhoNext, sampledTransition, nextCounts := sampleNodeTransition(state, transition, rng)
+	matrixScratch := make([]float64, state.Bins*state.Bins)
+	edgeExpected := make([]float64, state.Bins*state.Bins)
+	numerics.ActiveBackend.Sandwich(edgeExpected, matrixScratch, edgeBefore, sampledTransition, state.Bins)
+	edgeNext := sampleEdgeBlocks(state, rhoNext, nextCounts, edgeExpected, rng)
+
+	var scoreTransported, candidateTransported []float64
+	if state.Layer >= LayerBase {
+		scoreTransported = make([]float64, len(state.Score))
+		numerics.ActiveBackend.Sandwich(scoreTransported, matrixScratch, state.Score, sampledTransition, state.Bins)
+		candidateTransported = make([]float64, len(state.Candidate))
+		numerics.ActiveBackend.Sandwich(candidateTransported, matrixScratch, state.Candidate, sampledTransition, state.Bins)
+	}
+
+	var wedgeTransported []float64
+	if state.Layer >= LayerWedge {
+		wedgeTransported = make([]float64, len(state.Wedge))
+		scratch1 := make([]float64, len(state.Wedge))
+		scratch2 := make([]float64, len(state.Wedge))
+		numerics.ActiveBackend.TransportTensor3(wedgeTransported, scratch1, scratch2,
+			state.Wedge, sampledTransition, state.Bins)
+	}
+	var histogramTransported, xiTransported, componentTransported, bridgeTransported []float64
+	if state.Layer >= LayerHistogram {
+		histogramTransported = transportHistogram(state, sampledTransition)
+	}
+	if state.Layer >= LayerCandidate {
+		xiTransported = transportXi(state, sampledTransition)
+	}
+	if state.Layer >= LayerTopology {
+		componentTransported = transportComponents(state, sampledTransition)
+		bridgeTransported = make([]float64, len(state.Bridges))
+		numerics.ActiveBackend.Sandwich(bridgeTransported, matrixScratch, state.Bridges,
+			sampledTransition, state.Bins)
+	}
+
+	oldRho := append([]float64(nil), state.Rho...)
+	state.Rho, state.Edge = rhoNext, edgeNext
+	if state.Layer == LayerNaive {
+		state.rebuildCandidate()
+		state.rebuildScoreState(profile.ScoreAvailability)
+	} else {
+		state.Score, state.Wedge = scoreTransported, wedgeTransported
+		state.Histogram, state.Xi = histogramTransported, xiTransported
+		state.Components, state.Bridges = componentTransported, bridgeTransported
+		if state.Layer >= LayerCandidate {
+			state.projectXi()
+		} else {
+			state.rebuildCandidate()
+			for index := range state.Score {
+				if candidateTransported[index] > numerics.ProbabilityEpsilon {
+					ratio := state.Candidate[index] / candidateTransported[index]
+					state.Score[index] *= ratio
+					if state.Layer >= LayerWedge {
+						i, j := index/state.Bins, index%state.Bins
+						for center := 0; center < state.Bins; center++ {
+							state.Wedge[state.wedgeIndex(i, center, j)] *= ratio
+						}
+					}
+				} else {
+					state.Score[index] = 0
+					if state.Layer >= LayerWedge {
+						i, j := index/state.Bins, index%state.Bins
+						for center := 0; center < state.Bins; center++ {
+							state.Wedge[state.wedgeIndex(i, center, j)] = 0
+						}
+					}
+				}
+			}
+		}
+
+		// Relax transported auxiliary coordinates toward targets consistent with
+		// the newly sampled rho/E. This is the only non-projective part of their
+		// propagation and is controlled entirely by explicit closure parameters.
+		fresh, err := independentTarget(state, request, profile, state.Edge)
+		if err != nil {
+			return StepDiagnostics{}, err
+		}
+		if state.Layer >= LayerHistogram {
+			updated := make([]float64, len(state.Histogram))
+			numerics.MixInto(updated, state.Histogram, fresh.Histogram, request.Closure.HistogramRelaxation)
+			state.Histogram = updated
+		}
+		if state.Layer >= LayerCandidate {
+			updated := make([]float64, len(state.Xi))
+			numerics.MixInto(updated, state.Xi, fresh.Xi, request.Closure.CandidateRelaxation)
+			state.Xi = updated
+			state.projectXi()
+		}
+		if state.Layer >= LayerTopology {
+			updatedComponents := make([]float64, len(state.Components))
+			updatedBridges := make([]float64, len(state.Bridges))
+			numerics.MixInto(updatedComponents, state.Components, fresh.Components, request.Closure.TopologyRelaxation)
+			numerics.MixInto(updatedBridges, state.Bridges, fresh.Bridges, request.Closure.TopologyRelaxation)
+			state.Components, state.Bridges = updatedComponents, updatedBridges
+		}
+	}
+	if err := state.Validate(); err != nil {
+		return StepDiagnostics{}, fmt.Errorf("post-step validation: %w", err)
+	}
+	maxChange, expectedMoves := 0.0, 0.0
+	for i := range state.Rho {
+		maxChange = math.Max(maxChange, math.Abs(state.Rho[i]-oldRho[i]))
+		expectedMoves += float64(state.Population) * oldRho[i] * (1 - transition[state.matrixIndex(i, i)])
+	}
+	return StepDiagnostics{ExpectedMoves: expectedMoves, MaxRhoChange: maxChange}, nil
 }
 
 func sampleNodeTransition(state *State, transition []float64, rng *rand.Rand) ([]float64, []float64, []int) {
@@ -467,102 +592,7 @@ func Step(state *State, request config.RunRequest, profile ClosureProfile, rng *
 	}
 	updateRewiredCoordinates(state, target, request, profile, centerChange, globalChange)
 
-	rhoNext, sampledTransition, nextCounts := sampleNodeTransition(state, transition, rng)
-	matrixScratch := make([]float64, state.Bins*state.Bins)
-	edgeExpected := make([]float64, state.Bins*state.Bins)
-	numerics.ActiveBackend.Sandwich(edgeExpected, matrixScratch, edgeRewired, sampledTransition, state.Bins)
-	edgeNext := sampleEdgeBlocks(state, rhoNext, nextCounts, edgeExpected, rng)
-
-	scoreTransported := make([]float64, len(state.Score))
-	numerics.ActiveBackend.Sandwich(scoreTransported, matrixScratch, state.Score, sampledTransition, state.Bins)
-	candidateTransported := make([]float64, len(state.Candidate))
-	numerics.ActiveBackend.Sandwich(candidateTransported, matrixScratch, state.Candidate, sampledTransition, state.Bins)
-
-	var wedgeTransported []float64
-	if state.Layer >= LayerWedge {
-		wedgeTransported = make([]float64, len(state.Wedge))
-		scratch1 := make([]float64, len(state.Wedge))
-		scratch2 := make([]float64, len(state.Wedge))
-		numerics.ActiveBackend.TransportTensor3(wedgeTransported, scratch1, scratch2,
-			state.Wedge, sampledTransition, state.Bins)
-	}
-	var histogramTransported, xiTransported, componentTransported, bridgeTransported []float64
-	if state.Layer >= LayerHistogram {
-		histogramTransported = transportHistogram(state, sampledTransition)
-	}
-	if state.Layer >= LayerCandidate {
-		xiTransported = transportXi(state, sampledTransition)
-	}
-	if state.Layer >= LayerTopology {
-		componentTransported = transportComponents(state, sampledTransition)
-		bridgeTransported = make([]float64, len(state.Bridges))
-		numerics.ActiveBackend.Sandwich(bridgeTransported, matrixScratch, state.Bridges,
-			sampledTransition, state.Bins)
-	}
-
-	oldRho := append([]float64(nil), state.Rho...)
-	state.Rho, state.Edge = rhoNext, edgeNext
-	state.Score, state.Wedge = scoreTransported, wedgeTransported
-	state.Histogram, state.Xi = histogramTransported, xiTransported
-	state.Components, state.Bridges = componentTransported, bridgeTransported
-	if state.Layer >= LayerCandidate {
-		state.projectXi()
-	} else {
-		state.rebuildCandidate()
-		for index := range state.Score {
-			if candidateTransported[index] > numerics.ProbabilityEpsilon {
-				ratio := state.Candidate[index] / candidateTransported[index]
-				state.Score[index] *= ratio
-				if state.Layer >= LayerWedge {
-					i, j := index/state.Bins, index%state.Bins
-					for center := 0; center < state.Bins; center++ {
-						state.Wedge[state.wedgeIndex(i, center, j)] *= ratio
-					}
-				}
-			} else {
-				state.Score[index] = 0
-				if state.Layer >= LayerWedge {
-					i, j := index/state.Bins, index%state.Bins
-					for center := 0; center < state.Bins; center++ {
-						state.Wedge[state.wedgeIndex(i, center, j)] = 0
-					}
-				}
-			}
-		}
-	}
-
-	// Relax transported auxiliary coordinates toward targets consistent with
-	// the newly sampled rho/E. This is the only non-projective part of their
-	// propagation and is controlled entirely by explicit closure parameters.
-	fresh, err := independentTarget(state, request, profile, state.Edge)
-	if err != nil {
-		return StepDiagnostics{}, err
-	}
-	if state.Layer >= LayerHistogram {
-		updated := make([]float64, len(state.Histogram))
-		numerics.MixInto(updated, state.Histogram, fresh.Histogram, request.Closure.HistogramRelaxation)
-		state.Histogram = updated
-	}
-	if state.Layer >= LayerCandidate {
-		updated := make([]float64, len(state.Xi))
-		numerics.MixInto(updated, state.Xi, fresh.Xi, request.Closure.CandidateRelaxation)
-		state.Xi = updated
-		state.projectXi()
-	}
-	if state.Layer >= LayerTopology {
-		updatedComponents := make([]float64, len(state.Components))
-		updatedBridges := make([]float64, len(state.Bridges))
-		numerics.MixInto(updatedComponents, state.Components, fresh.Components, request.Closure.TopologyRelaxation)
-		numerics.MixInto(updatedBridges, state.Bridges, fresh.Bridges, request.Closure.TopologyRelaxation)
-		state.Components, state.Bridges = updatedComponents, updatedBridges
-	}
-	if err := state.Validate(); err != nil {
-		return StepDiagnostics{}, fmt.Errorf("post-step validation: %w", err)
-	}
-	maxChange, expectedMoves := 0.0, 0.0
-	for i := range state.Rho {
-		maxChange = math.Max(maxChange, math.Abs(state.Rho[i]-oldRho[i]))
-		expectedMoves += float64(state.Population) * oldRho[i] * (1 - transition[state.matrixIndex(i, i)])
-	}
-	return StepDiagnostics{RewiringEvents: rewiringEvents, ExpectedMoves: expectedMoves, MaxRhoChange: maxChange}, nil
+	diagnostics, err := advanceOpinion(state, request, profile, transition, edgeRewired, rng)
+	diagnostics.RewiringEvents = rewiringEvents
+	return diagnostics, err
 }

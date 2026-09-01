@@ -6,7 +6,7 @@ Go packages (there is no `internal` tree):
 
 - `config`: strict, explicit request schema and validation;
 - `numerics`: probability utilities and optional dense BLAS contractions;
-- `meso`: the five nested retained states and their stochastic one-step law;
+- `meso`: the six nested retained states, unsplit law, and conditional fast-absorption law;
 - `solver`: path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
 - `protocol`: recoverable JSONL batch transport;
@@ -18,10 +18,11 @@ new process for every point.
 
 ## Retained-state ladder
 
-All masses use a per-agent normalization. The five nested layers are:
+All masses use a per-agent normalization. The six nested layers are:
 
 | request value | retained coordinates beyond `rho,E` | ambiguity removed from the preceding layer |
 |---|---|---|
+| `naive` / `rho_edge` | none; `C,S_zeta` are reconstructed workspaces, not transported state | none |
 | `base` / `l0` | candidate mass `C` and the requested powered score mass `S_zeta` | none |
 | `wedge` / `l1` | candidate-weighted centre-opinion wedge `W` | first-score/motif allocation |
 | `histogram` / `l2` | agent histogram `H_i(k,d,c)` | discordant-followee/concordant-feed eligibility coupling |
@@ -37,6 +38,15 @@ resolved first moment in `W`: the projection is exact at `zeta=1`, while higher
 powers preserve the pre-rewiring conditional shape factor
 `S_zeta / S_1^zeta`. Candidate and topology states instead project `C`,
 `S_zeta`, and the first moment of `W` from the richer `Xi` coordinate.
+
+The request also selects `fast_slow.mode`. `unsplit` applies the ordinary
+synchronous generator. `conditional_absorption` is activated only when
+`rewiring_rate / influence` reaches the explicit `ratio_threshold`; at fixed
+`rho` it repeatedly samples rewiring until the conditional intensity vanishes
+or an explicit safety rule fires, and then takes one opinion step. This is a
+sampled non-ergodic absorbing-class projection, not a stationary average over
+a presumed unique fast invariant distribution. Below threshold it calls the
+unsplit step exactly, including the same random stream.
 
 The reported point estimate is the empirical probability vector in the order
 `[k1,k2,k3,k4plus,censored]`. The interval result contains two distinct
@@ -136,6 +146,14 @@ auditable. A request has this shape:
     "candidate_relaxation": 0.25,
     "topology_relaxation": 0.25
   },
+  "fast_slow": {
+    "mode": "unsplit",
+    "ratio_threshold": 10.0,
+    "max_substeps": 400,
+    "zero_event_batches": 8,
+    "residual_tolerance": 1e-12,
+    "zero_event_residual": 0.25
+  },
   "ambiguity": {
     "eligibility_correlation_radius": 0.75,
     "score_availability_radius": 0.75,
@@ -155,6 +173,12 @@ weighted StructureRandom implementation, which samples from unperturbed raw
 common-neighbour counts. OpinionRandom noise is integrated by deterministic
 normal quadrature; retaining the realised microscopic noisy weight matrix would
 require an additional state coordinate.
+
+Supported `fast_slow.mode` values are `unsplit` and
+`conditional_absorption`. All stopping controls are required even for
+`unsplit`, keeping saved requests complete. Point diagnostics report applied
+paths, fast substeps, fast rewiring events, safety-cap hits, and final residual
+conditional intensity.
 
 Run one JSON object or a batch of newline-delimited objects. The quiet form
 keeps stdout as result-only JSON/JSONL:

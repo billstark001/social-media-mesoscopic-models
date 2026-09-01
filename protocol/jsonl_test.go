@@ -31,6 +31,8 @@ func protocolRequest(id string) config.RunRequest {
 			MotifRelaxation: 0.2, HistogramRelaxation: 0.2,
 			CandidateRelaxation: 0.2, TopologyRelaxation: 0.2,
 		},
+		FastSlow: config.FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
+			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
 		Ambiguity: config.AmbiguityConfig{},
 	}
 }

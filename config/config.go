@@ -13,7 +13,8 @@ import (
 type Layer int
 
 const (
-	LayerBase Layer = iota
+	LayerNaive Layer = iota
+	LayerBase
 	LayerWedge
 	LayerHistogram
 	LayerCandidate
@@ -22,6 +23,8 @@ const (
 
 func (l Layer) String() string {
 	switch l {
+	case LayerNaive:
+		return "naive"
 	case LayerBase:
 		return "base"
 	case LayerWedge:
@@ -39,6 +42,8 @@ func (l Layer) String() string {
 
 func ParseLayer(value string) (Layer, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "naive", "rho_edge", "rho-e", "l-1":
+		return LayerNaive, nil
 	case "base", "l0":
 		return LayerBase, nil
 	case "wedge", "l1":
@@ -91,6 +96,15 @@ type ClosureConfig struct {
 	TopologyRelaxation  float64 `json:"topology_relaxation"`
 }
 
+type FastSlowConfig struct {
+	Mode              string  `json:"mode"`
+	RatioThreshold    float64 `json:"ratio_threshold"`
+	MaxSubsteps       int     `json:"max_substeps"`
+	ZeroEventBatches  int     `json:"zero_event_batches"`
+	ResidualTolerance float64 `json:"residual_tolerance"`
+	ZeroEventResidual float64 `json:"zero_event_residual"`
+}
+
 type AmbiguityConfig struct {
 	EligibilityCorrelationRadius float64 `json:"eligibility_correlation_radius"`
 	ScoreAvailabilityRadius      float64 `json:"score_availability_radius"`
@@ -121,6 +135,7 @@ type RunRequest struct {
 	Initial             InitialConfig     `json:"initial"`
 	Resolution          ResolutionConfig  `json:"resolution"`
 	Closure             ClosureConfig     `json:"closure"`
+	FastSlow            FastSlowConfig    `json:"fast_slow"`
 	Ambiguity           AmbiguityConfig   `json:"ambiguity"`
 }
 
@@ -141,6 +156,9 @@ var requiredPaths = [][]string{
 	{"resolution", "opinion_quadrature_points"},
 	{"closure", "motif_relaxation"}, {"closure", "histogram_relaxation"},
 	{"closure", "candidate_relaxation"}, {"closure", "topology_relaxation"},
+	{"fast_slow", "mode"}, {"fast_slow", "ratio_threshold"},
+	{"fast_slow", "max_substeps"}, {"fast_slow", "zero_event_batches"},
+	{"fast_slow", "residual_tolerance"}, {"fast_slow", "zero_event_residual"},
 	{"ambiguity", "eligibility_correlation_radius"},
 	{"ambiguity", "score_availability_radius"},
 	{"ambiguity", "motif_persistence_radius"},
@@ -324,6 +342,25 @@ func (r RunRequest) Validate() error {
 		if err := unit(name, value); err != nil {
 			return err
 		}
+	}
+	fastSlowMode := strings.ToLower(strings.TrimSpace(r.FastSlow.Mode))
+	if fastSlowMode != "unsplit" && fastSlowMode != "conditional_absorption" {
+		return fmt.Errorf("unsupported fast_slow.mode %q", r.FastSlow.Mode)
+	}
+	if err := nonnegative("fast_slow.ratio_threshold", r.FastSlow.RatioThreshold); err != nil {
+		return err
+	}
+	if r.FastSlow.MaxSubsteps < 1 {
+		return errors.New("fast_slow.max_substeps must be positive")
+	}
+	if r.FastSlow.ZeroEventBatches < 1 {
+		return errors.New("fast_slow.zero_event_batches must be positive")
+	}
+	if err := nonnegative("fast_slow.residual_tolerance", r.FastSlow.ResidualTolerance); err != nil {
+		return err
+	}
+	if err := nonnegative("fast_slow.zero_event_residual", r.FastSlow.ZeroEventResidual); err != nil {
+		return err
 	}
 	for name, value := range map[string]float64{
 		"ambiguity.eligibility_correlation_radius": r.Ambiguity.EligibilityCorrelationRadius,

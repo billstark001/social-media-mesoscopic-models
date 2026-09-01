@@ -12,6 +12,7 @@ import (
 type Layer = config.Layer
 
 const (
+	LayerNaive     = config.LayerNaive
 	LayerBase      = config.LayerBase
 	LayerWedge     = config.LayerWedge
 	LayerHistogram = config.LayerHistogram
@@ -60,9 +61,13 @@ func newEmptyState(request config.RunRequest, layer Layer) *State {
 		ComponentSizeBins: request.Resolution.ComponentSizeBins,
 		Steepness:         request.Recommender.Steepness,
 		Axis:              make([]float64, bins), Rho: make([]float64, bins),
-		Edge: make([]float64, bins*bins), Candidate: make([]float64, bins*bins),
-		Score: make([]float64, bins*bins),
+		Edge: make([]float64, bins*bins),
 	}
+	// Naive keeps only rho/E dynamically. Candidate and Score are workspace
+	// caches reconstructed from rho/E before they are used, so they are not
+	// counted as retained coordinates.
+	state.Candidate = make([]float64, bins*bins)
+	state.Score = make([]float64, bins*bins)
 	dx := (request.Initial.OpinionMax - request.Initial.OpinionMin) / float64(bins)
 	for i := range state.Axis {
 		state.Axis[i] = request.Initial.OpinionMin + (float64(i)+0.5)*dx
@@ -611,6 +616,10 @@ func (s *State) validateWedgeProjection() error {
 }
 
 func (s *State) Dimension() int {
-	return len(s.Rho) + len(s.Edge) + len(s.Candidate) + len(s.Score) +
+	dimension := len(s.Rho) + len(s.Edge)
+	if s.Layer >= LayerBase {
+		dimension += len(s.Candidate) + len(s.Score)
+	}
+	return dimension +
 		len(s.Wedge) + len(s.Histogram) + len(s.Xi) + len(s.Components) + len(s.Bridges)
 }

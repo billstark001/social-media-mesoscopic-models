@@ -20,6 +20,8 @@ func validRequest() RunRequest {
 		Initial:    InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
 		Resolution: ResolutionConfig{ScoreMax: 8, AvailabilityBins: 5, ComponentSizeBins: 5, OpinionQuadrature: 3},
 		Closure:    ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
+		FastSlow: FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
+			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
 		Ambiguity: AmbiguityConfig{
 			EligibilityCorrelationRadius: 0.5, ScoreAvailabilityRadius: 0.5,
 			MotifPersistenceRadius: 0.5, BridgeBiasRadius: 0.5, ComponentMixRadius: 0.5,
@@ -49,8 +51,24 @@ func TestDecodeRequestRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestFastSlowConfigurationIsExplicitAndValidated(t *testing.T) {
+	data, err := json.Marshal(validRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := strings.Replace(string(data), `,"fast_slow":`, `,"omitted_fast_slow":`, 1)
+	if _, err := DecodeRequest([]byte(missing)); err == nil || !strings.Contains(err.Error(), "fast_slow") {
+		t.Fatalf("missing fast_slow object was not reported: %v", err)
+	}
+	request := validRequest()
+	request.FastSlow.Mode = "stationary_average"
+	if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "fast_slow.mode") {
+		t.Fatalf("unsupported mode was not rejected: %v", err)
+	}
+}
+
 func TestAllLayerNames(t *testing.T) {
-	for _, name := range []string{"base", "wedge", "histogram", "candidate", "topology"} {
+	for _, name := range []string{"naive", "base", "wedge", "histogram", "candidate", "topology"} {
 		layer, err := ParseLayer(name)
 		if err != nil {
 			t.Fatal(err)
