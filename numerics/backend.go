@@ -1,11 +1,18 @@
 package numerics
 
-// denseBackend contains only the two contractions used by the mesoscopic
-// state. Implementations must permit dst to be distinct from every input.
+// Backend owns the model-independent linear algebra kernels. Implementations
+// must permit dst to be distinct from every input.
 type Backend interface {
 	Name() string
 	Sandwich(dst, scratch, matrix, transition []float64, size int)
 	TransportTensor3(dst, scratch1, scratch2, tensor, transition []float64, size int)
+	MultiplyABT(dst, left, right []float64, size int)
+	ApplyTransition(dst, source []float64, transition *SparseTransition)
+	SandwichTransition(dst, scratch, matrix []float64, transition *SparseTransition)
+	TransportTransitionTensor3(dst, scratch, tensor []float64, transition *SparseTransition, channels int)
+	ApplyTridiagonal(dst, source []float64, system *TridiagonalSystem)
+	TransportTridiagonalMatrix(dst, scratch, source []float64, system *TridiagonalSystem)
+	TransportTridiagonalTensor3(dst, scratch, source []float64, system *TridiagonalSystem, channels int)
 }
 
 type pureGoBackend struct {
@@ -13,6 +20,17 @@ type pureGoBackend struct {
 }
 
 func (b pureGoBackend) Name() string { return b.name }
+
+func (b pureGoBackend) MultiplyABT(dst, left, right []float64, size int) {
+	clear(dst)
+	for row := 0; row < size; row++ {
+		for column := 0; column < size; column++ {
+			for inner := 0; inner < size; inner++ {
+				dst[row*size+column] += left[row*size+inner] * right[column*size+inner]
+			}
+		}
+	}
+}
 
 // Sandwich computes transition^T * matrix * transition for row-major square
 // matrices. The loop ordering keeps the inner operations contiguous.

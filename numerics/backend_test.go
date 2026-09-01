@@ -70,3 +70,78 @@ func TestActiveBackendMatchesPureGoForDenseTransport(t *testing.T) {
 		}
 	}
 }
+
+func TestSparseBackendMatchesDenseBackend(t *testing.T) {
+	const size = 3
+	dense := []float64{
+		0.7, 0.2, 0.1,
+		0.1, 0.6, 0.3,
+		0.25, 0.25, 0.5,
+	}
+	transition := DenseToSparse(dense, size)
+	vector := []float64{0.2, 0.3, 0.5}
+	matrix := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	tensor := make([]float64, 2*size*size*size)
+	for index := range tensor {
+		tensor[index] = float64(index+1) / 71
+	}
+	vectorExpected := make([]float64, size)
+	pureGoBackend{}.ApplyTransition(vectorExpected, vector, transition)
+	vectorObserved := make([]float64, size)
+	ActiveBackend.ApplyTransition(vectorObserved, vector, transition)
+	matrixExpected := make([]float64, len(matrix))
+	pureGoBackend{}.SandwichTransition(matrixExpected, make([]float64, len(matrix)), matrix, transition)
+	matrixObserved := make([]float64, len(matrix))
+	ActiveBackend.SandwichTransition(matrixObserved, make([]float64, len(matrix)), matrix, transition)
+	tensorExpected := make([]float64, len(tensor))
+	pureGoBackend{}.TransportTransitionTensor3(tensorExpected, make([]float64, len(tensor)), tensor, transition, 2)
+	tensorObserved := make([]float64, len(tensor))
+	ActiveBackend.TransportTransitionTensor3(tensorObserved, make([]float64, len(tensor)), tensor, transition, 2)
+	for name, pair := range map[string][2][]float64{
+		"vector": {vectorObserved, vectorExpected},
+		"matrix": {matrixObserved, matrixExpected},
+		"tensor": {tensorObserved, tensorExpected},
+	} {
+		for index := range pair[0] {
+			if math.Abs(pair[0][index]-pair[1][index]) > 1e-12 {
+				t.Fatalf("%s[%d]=%g want %g", name, index, pair[0][index], pair[1][index])
+			}
+		}
+	}
+}
+
+func TestTridiagonalBackendIdentityAndMass(t *testing.T) {
+	const size = 3
+	identity := NewTridiagonalSystem([]float64{0, 0}, []float64{1, 1, 1}, []float64{0, 0})
+	tensor := make([]float64, 2*size*size*size)
+	for index := range tensor {
+		tensor[index] = float64(index + 1)
+	}
+	observed := make([]float64, len(tensor))
+	ActiveBackend.TransportTridiagonalTensor3(observed, make([]float64, len(tensor)), tensor, identity, 2)
+	for index := range tensor {
+		if math.Abs(observed[index]-tensor[index]) > 1e-12 {
+			t.Fatalf("identity tensor[%d]=%g want %g", index, observed[index], tensor[index])
+		}
+	}
+	system := NewTridiagonalSystem([]float64{-0.2, -0.2}, []float64{1.2, 1.4, 1.2}, []float64{-0.2, -0.2})
+	vector := []float64{0.2, 0.3, 0.5}
+	ActiveBackend.ApplyTridiagonal(observed[:size], vector, system)
+	total := observed[0] + observed[1] + observed[2]
+	if math.Abs(total-1) > 1e-12 {
+		t.Fatalf("tridiagonal solve changed mass: %g", total)
+	}
+}
+
+func TestMultiplyABT(t *testing.T) {
+	left := []float64{1, 2, 3, 4}
+	right := []float64{5, 6, 7, 8}
+	observed := make([]float64, 4)
+	ActiveBackend.MultiplyABT(observed, left, right, 2)
+	expected := []float64{17, 23, 39, 53}
+	for index := range expected {
+		if math.Abs(observed[index]-expected[index]) > 1e-12 {
+			t.Fatalf("ABT[%d]=%g want %g", index, observed[index], expected[index])
+		}
+	}
+}
