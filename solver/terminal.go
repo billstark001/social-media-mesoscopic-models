@@ -3,7 +3,7 @@ package solver
 import (
 	"math"
 	"smp-meso/config"
-	"smp-meso/meso"
+	"smp-meso/lifted"
 )
 
 var Categories = []string{"k1", "k2", "k3", "k4plus", "censored"}
@@ -24,7 +24,7 @@ func categoryIndex(clusterCount int) int {
 // terminalCategory returns an absorbing major-cluster category. Every occupied
 // confidence component must have diameter no larger than tolerance; minor
 // components remain part of the invariance check but are not counted as major.
-func terminalCategory(state *meso.State, request config.RunRequest) (int, bool) {
+func terminalCategory(state *lifted.State, request config.RunRequest) (int, bool) {
 	occupiedThreshold := 0.5 / float64(state.Population)
 	occupied := make([]int, 0, state.Bins)
 	for index, mass := range state.Rho {

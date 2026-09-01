@@ -12,7 +12,7 @@ no `internal` tree):
 - `config`: strict, explicit request schema and validation;
 - `numerics`: probability utilities, canonical sparse/dense transport,
   batched contractions, and reusable tridiagonal factorizations;
-- `meso`: the six nested retained states, unsplit law, and conditional fast-absorption law;
+- `lifted`: the six nested retained states, unsplit law, and conditional fast-absorption law;
 - `solver`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
 - `kinetic`: nonlocal measure and finite-volume Fokker--Planck dynamics;

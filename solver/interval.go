@@ -4,47 +4,47 @@ import (
 	"math"
 	"math/rand/v2"
 	"smp-meso/config"
-	"smp-meso/meso"
+	"smp-meso/lifted"
 	"smp-meso/numerics"
 	"smp-meso/protocol"
 )
 
 type intervalCoordinate struct {
 	radius float64
-	set    func(*meso.ClosureProfile, float64)
+	set    func(*lifted.ClosureProfile, float64)
 }
 
 type intervalCoordinateSpec struct {
 	resolvedAt config.Layer
 	radius     func(config.AmbiguityConfig) float64
-	set        func(*meso.ClosureProfile, float64)
+	set        func(*lifted.ClosureProfile, float64)
 }
 
 var intervalCoordinateSpecs = [...]intervalCoordinateSpec{
 	{
 		resolvedAt: config.LayerWedge,
 		radius:     func(value config.AmbiguityConfig) float64 { return value.MotifPersistenceRadius },
-		set:        func(profile *meso.ClosureProfile, value float64) { profile.MotifPersistence = value },
+		set:        func(profile *lifted.ClosureProfile, value float64) { profile.MotifPersistence = value },
 	},
 	{
 		resolvedAt: config.LayerHistogram,
 		radius:     func(value config.AmbiguityConfig) float64 { return value.EligibilityCorrelationRadius },
-		set:        func(profile *meso.ClosureProfile, value float64) { profile.EligibilityCorrelation = value },
+		set:        func(profile *lifted.ClosureProfile, value float64) { profile.EligibilityCorrelation = value },
 	},
 	{
 		resolvedAt: config.LayerCandidate,
 		radius:     func(value config.AmbiguityConfig) float64 { return value.ScoreAvailabilityRadius },
-		set:        func(profile *meso.ClosureProfile, value float64) { profile.ScoreAvailability = value },
+		set:        func(profile *lifted.ClosureProfile, value float64) { profile.ScoreAvailability = value },
 	},
 	{
 		resolvedAt: config.LayerTopology,
 		radius:     func(value config.AmbiguityConfig) float64 { return value.BridgeBiasRadius },
-		set:        func(profile *meso.ClosureProfile, value float64) { profile.BridgeBias = value },
+		set:        func(profile *lifted.ClosureProfile, value float64) { profile.BridgeBias = value },
 	},
 	{
 		resolvedAt: config.LayerTopology,
 		radius:     func(value config.AmbiguityConfig) float64 { return value.ComponentMixRadius },
-		set:        func(profile *meso.ClosureProfile, value float64) { profile.ComponentMix = value },
+		set:        func(profile *lifted.ClosureProfile, value float64) { profile.ComponentMix = value },
 	},
 }
 
@@ -61,26 +61,26 @@ func activeCoordinates(request config.RunRequest, layer config.Layer) []interval
 	return coordinates
 }
 
-func ambiguityProfiles(request config.RunRequest, layer config.Layer) []meso.ClosureProfile {
+func ambiguityProfiles(request config.RunRequest, layer config.Layer) []lifted.ClosureProfile {
 	coordinates := activeCoordinates(request, layer)
 	if len(coordinates) == 0 {
-		return []meso.ClosureProfile{{}}
+		return []lifted.ClosureProfile{{}}
 	}
-	profiles := make([]meso.ClosureProfile, 0, request.AmbiguitySamples)
-	profiles = append(profiles, meso.ClosureProfile{})
+	profiles := make([]lifted.ClosureProfile, 0, request.AmbiguitySamples)
+	profiles = append(profiles, lifted.ClosureProfile{})
 	for index := 0; len(profiles) < request.AmbiguitySamples && index < 2*len(coordinates); index++ {
 		coordinate := coordinates[index/2]
 		value := coordinate.radius
 		if index%2 == 1 {
 			value = -value
 		}
-		profile := meso.ClosureProfile{}
+		profile := lifted.ClosureProfile{}
 		coordinate.set(&profile, value)
 		profiles = append(profiles, profile)
 	}
 	rng := rand.New(rand.NewPCG(splitMix64(request.Seed^0xa0761d6478bd642f), splitMix64(request.Seed^0xe7037ed1a0b428db)))
 	for len(profiles) < request.AmbiguitySamples {
-		profile := meso.ClosureProfile{}
+		profile := lifted.ClosureProfile{}
 		for _, coordinate := range coordinates {
 			coordinate.set(&profile, (2*rng.Float64()-1)*coordinate.radius)
 		}
@@ -104,19 +104,19 @@ func wilson(successes, trials int, confidence float64) (float64, float64) {
 }
 
 type IntervalEstimate struct {
-	Method              string                `json:"method"`
-	ConfidenceLevel     float64               `json:"confidence_level"`
-	ConfidenceScope     string                `json:"confidence_scope"`
-	ScenarioCount       int                   `json:"scenario_count"`
-	PathsPerScenario    int                   `json:"paths_per_scenario"`
-	ClosureLower        []float64             `json:"closure_lower"`
-	ClosureUpper        []float64             `json:"closure_upper"`
-	ClosureWidth        []float64             `json:"closure_width"`
-	Lower               []float64             `json:"lower"`
-	Upper               []float64             `json:"upper"`
-	Width               []float64             `json:"width"`
-	ScenarioProfiles    []meso.ClosureProfile `json:"scenario_profiles"`
-	ScenarioProbability [][]float64           `json:"scenario_probabilities"`
+	Method              string                  `json:"method"`
+	ConfidenceLevel     float64                 `json:"confidence_level"`
+	ConfidenceScope     string                  `json:"confidence_scope"`
+	ScenarioCount       int                     `json:"scenario_count"`
+	PathsPerScenario    int                     `json:"paths_per_scenario"`
+	ClosureLower        []float64               `json:"closure_lower"`
+	ClosureUpper        []float64               `json:"closure_upper"`
+	ClosureWidth        []float64               `json:"closure_width"`
+	Lower               []float64               `json:"lower"`
+	Upper               []float64               `json:"upper"`
+	Width               []float64               `json:"width"`
+	ScenarioProfiles    []lifted.ClosureProfile `json:"scenario_profiles"`
+	ScenarioProbability [][]float64             `json:"scenario_probabilities"`
 }
 
 func runInterval(
@@ -132,7 +132,7 @@ func runInterval(
 		ConfidenceLevel: request.ConfidenceLevel,
 		ConfidenceScope: "per-scenario per-category marginal; no simultaneous correction",
 		ScenarioCount:   len(profiles), PathsPerScenario: request.IntervalPaths,
-		ScenarioProfiles: append([]meso.ClosureProfile(nil), profiles...),
+		ScenarioProfiles: append([]lifted.ClosureProfile(nil), profiles...),
 		ClosureLower:     make([]float64, len(Categories)),
 		ClosureUpper:     make([]float64, len(Categories)),
 		Lower:            append([]float64(nil), point.Probabilities...),

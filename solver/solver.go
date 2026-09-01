@@ -2,7 +2,7 @@ package solver
 
 import (
 	"smp-meso/config"
-	"smp-meso/meso"
+	"smp-meso/lifted"
 	"smp-meso/numerics"
 	"smp-meso/protocol"
 	"time"
@@ -78,7 +78,7 @@ func RunWithProgress(
 		pointProgress = nil
 	}
 	point, err := runEnsembleWithProgress(
-		request, layer, meso.ClosureProfile{}, request.Paths,
+		request, layer, lifted.ClosureProfile{}, request.Paths,
 		0xbb67ae8584caa73b, progressStepInterval, pointProgress,
 	)
 	if err != nil {

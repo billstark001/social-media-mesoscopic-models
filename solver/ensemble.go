@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"smp-meso/config"
-	"smp-meso/meso"
+	"smp-meso/lifted"
 	"smp-meso/protocol"
 	"sync"
 	"sync/atomic"
@@ -47,7 +47,7 @@ func splitMix64(value uint64) uint64 {
 func runPath(
 	request config.RunRequest,
 	layer config.Layer,
-	profile meso.ClosureProfile,
+	profile lifted.ClosureProfile,
 	seed uint64,
 	progressStepInterval int,
 	onStep func(step int),
@@ -55,7 +55,7 @@ func runPath(
 	seed1 := splitMix64(seed)
 	seed2 := splitMix64(seed1)
 	rng := rand.New(rand.NewPCG(seed1, seed2))
-	state, err := meso.InitialState(request, layer, profile, rng)
+	state, err := lifted.InitialState(request, layer, profile, rng)
 	if err != nil {
 		return PathOutcome{}, err
 	}
@@ -69,7 +69,7 @@ func runPath(
 	fastSlowApplied := false
 	finalFastResidual := 0.0
 	for step := 1; step <= request.MaxSteps; step++ {
-		diagnostics, err := meso.FastSlowStep(state, request, profile, rng)
+		diagnostics, err := lifted.FastSlowStep(state, request, profile, rng)
 		if err != nil {
 			return PathOutcome{}, fmt.Errorf("step %d: %w", step, err)
 		}
@@ -105,7 +105,7 @@ func runPath(
 func runEnsembleWithProgress(
 	request config.RunRequest,
 	layer config.Layer,
-	profile meso.ClosureProfile,
+	profile lifted.ClosureProfile,
 	paths int,
 	seedNamespace uint64,
 	progressStepInterval int,
