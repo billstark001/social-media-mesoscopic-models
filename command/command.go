@@ -19,6 +19,44 @@ type options struct {
 	arguments            []string
 }
 
+// NewExecutor adapts a typed request decoder and solver to the shared JSONL
+// protocol, including consistent rejection/failure telemetry.
+func NewExecutor[Request, Result any](
+	solver string,
+	decode func([]byte) (Request, error),
+	context func(Request) (requestID, layer string),
+	run func(Request, int, protocol.ProgressFunc) (Result, error),
+) protocol.ExecuteFunc {
+	return func(data []byte, progressStepInterval int, progress protocol.ProgressFunc) protocol.Response {
+		request, err := decode(data)
+		if err != nil {
+			var partial struct {
+				RequestID string `json:"request_id"`
+			}
+			_ = json.Unmarshal(data, &partial)
+			if progress != nil {
+				progress(protocol.ProgressEvent{
+					Event: "request_rejected", RequestID: partial.RequestID,
+					Solver: solver, Message: err.Error(),
+				})
+			}
+			return protocol.Response{RequestID: partial.RequestID, Error: err.Error()}
+		}
+		requestID, layer := context(request)
+		result, err := run(request, progressStepInterval, progress)
+		if err != nil {
+			if progress != nil {
+				progress(protocol.ProgressEvent{
+					Event: "request_failed", RequestID: requestID,
+					Solver: solver, Layer: layer, Message: err.Error(),
+				})
+			}
+			return protocol.Response{RequestID: requestID, Error: err.Error()}
+		}
+		return protocol.Response{RequestID: requestID, Result: &result}
+	}
+}
+
 func usage(program string) {
 	fmt.Fprintf(os.Stderr, "Usage:\n  %s run [--progress off|human|jsonl] [--progress-step-interval N] <JSON|-|@file>\n  %s batch [--progress off|human|jsonl] [--progress-step-interval N] < requests.jsonl > responses.jsonl\n", program, program)
 }
