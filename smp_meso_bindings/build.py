@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 Backend = Literal["purego", "openblas", "accelerate"]
+Command = Literal["lifted", "kinetic"]
 
 
 def _source_root(source_root: os.PathLike[str] | str | None) -> Path:
@@ -54,11 +55,12 @@ def _openblas_environment(environment: dict[str, str]) -> dict[str, str]:
 
 def build_binary(
     *,
+    command_name: Command,
     source_root: os.PathLike[str] | str | None = None,
     output_path: os.PathLike[str] | str | None = None,
     backend: Backend = "purego",
 ) -> Path:
-    """Build ``cmd/smp-meso`` and return the absolute binary path.
+    """Build one Go command and return the absolute binary path.
 
     Model parameters have no defaults in the bindings. ``backend`` is only a
     build choice: pure Go is dependency-free, OpenBLAS is opt-in through CGO,
@@ -69,7 +71,7 @@ def build_binary(
     output = (
         Path(output_path).expanduser().resolve()
         if output_path is not None
-        else root / "bin" / "smp-meso"
+        else root / "bin" / f"smp-{command_name}"
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     environment = dict(os.environ)
@@ -84,7 +86,9 @@ def build_binary(
         command.extend(["-tags", "accelerate"])
     elif backend != "purego":
         raise ValueError(f"unsupported backend {backend!r}")
-    command.append("./cmd/smp-meso")
+    if command_name not in {"lifted", "kinetic"}:
+        raise ValueError(f"unsupported command {command_name!r}")
+    command.append(f"./cmd/smp-{command_name}")
     subprocess.run(command, cwd=root, env=environment, check=True)
     return output
 
@@ -93,11 +97,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root")
     parser.add_argument("--output")
+    parser.add_argument("--command", choices=("lifted", "kinetic"), required=True)
     parser.add_argument(
         "--backend", choices=("purego", "openblas", "accelerate"), required=True
     )
     arguments = parser.parse_args()
     path = build_binary(
+        command_name=arguments.command,
         source_root=arguments.source_root,
         output_path=arguments.output,
         backend=arguments.backend,

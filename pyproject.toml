@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smp-meso-bindings"
 version = "0.1.0"
-description = "Batch Python orchestration for the Go SMP mesoscopic terminal solver"
+description = "Batch Python orchestration for the Go SMP lifted and kinetic solvers"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
 
 [project.scripts]
-smp-meso-build = "smp_meso_bindings.build:main"
+smp-mesoscopic-build = "smp_meso_bindings.build:main"
 
 [tool.setuptools.packages.find]
 include = ["smp_meso_bindings*"]
