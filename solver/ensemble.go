@@ -101,16 +101,6 @@ func runPath(
 	}, nil
 }
 
-func RunEnsemble(
-	request config.RunRequest,
-	layer config.Layer,
-	profile meso.ClosureProfile,
-	paths int,
-	seedNamespace uint64,
-) (Ensemble, error) {
-	return runEnsembleWithProgress(request, layer, profile, paths, seedNamespace, 0, nil)
-}
-
 func runEnsembleWithProgress(
 	request config.RunRequest,
 	layer config.Layer,

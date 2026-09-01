@@ -23,10 +23,6 @@ func requestIDFromRaw(data []byte) string {
 	return partial.RequestID
 }
 
-func Execute(data []byte) Response {
-	return ExecuteWithProgress(data, 0, nil)
-}
-
 func ExecuteWithProgress(data []byte, progressStepInterval int, progress solver.ProgressFunc) Response {
 	request, err := config.DecodeRequest(data)
 	if err != nil {

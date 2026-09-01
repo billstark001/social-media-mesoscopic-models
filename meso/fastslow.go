@@ -60,7 +60,7 @@ func FastSlowStep(
 
 	zeroBatches := 0
 	fastEvents := 0
-	residual := math.Inf(1)
+	var residual float64
 	substeps := 0
 	for ; substeps < request.FastSlow.MaxSubsteps; substeps++ {
 		recommendations, neighbors, _, currentResidual, err :=
