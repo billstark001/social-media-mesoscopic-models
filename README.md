@@ -86,6 +86,19 @@ go build -o bin/smp-kinetic ./cmd/smp-kinetic
 go test ./...
 ```
 
+The repository Makefile provides the same default workflow and keeps both
+binaries under `bin/`:
+
+```sh
+make build
+make test
+make install-python
+make test-python
+```
+
+Set `GO_TAGS=accelerate` or `GO_TAGS=openblas` on `make build`, `make test`, or
+`make benchmark` to select an optional numerical backend.
+
 On macOS, Accelerate is optional:
 
 ```sh
