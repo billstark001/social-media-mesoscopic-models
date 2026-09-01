@@ -10,8 +10,8 @@ The implementation is deliberately split into ordinary Go packages (there is
 no `internal` tree):
 
 - `config`: strict, explicit request schema and validation;
-- `numerics`: probability utilities, sparse/dense transport, batched
-  tridiagonal solves, and optional BLAS contractions;
+- `numerics`: probability utilities, canonical sparse/dense transport,
+  batched contractions, and reusable tridiagonal factorizations;
 - `meso`: the six nested retained states, unsplit law, and conditional fast-absorption law;
 - `solver`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
@@ -106,8 +106,22 @@ go build -tags openblas -o bin/smp-lifted ./cmd/smp-lifted
 go build -tags openblas -o bin/smp-kinetic ./cmd/smp-kinetic
 ```
 
-The `openblas` and `accelerate` tags are mutually exclusive. Backend selection
-changes only dense contractions, not the model or random streams.
+The `openblas` and `accelerate` tags are mutually exclusive. They select native
+BLAS for dense contractions and native LAPACK for reusable tridiagonal
+factorizations and batched solves. Sparse transition kernels remain sparse when
+their density is at most 25%; denser operators use BLAS. Both representations
+are built from the same pruned, row-normalized transition, so backend selection
+does not change the model or random streams, although floating-point reduction
+order can change last-bit results.
+
+## Resource limits
+
+Both solvers validate dimension products before allocating and reject requests
+whose conservatively estimated concurrent working set exceeds 512 MiB. Each
+`base64+zlib+f64le` field is likewise limited to 512 MiB after decompression,
+and its decoded byte count must exactly match its declared shape. These are
+recoverable request errors in JSONL batch mode rather than allocation panics or
+process-wide failures.
 
 ## Lifted request
 
