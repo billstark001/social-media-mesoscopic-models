@@ -255,13 +255,20 @@ func (plan *Plan) distanceMass(pair []float64) []float64 {
 
 func (plan *Plan) calculatePolarization(rho []float64) float64 {
 	size := len(rho)
-	pair := make([]float64, size*size)
+	mass := make([]float64, len(plan.axis))
+	total := 0.0
 	for left := 0; left < size; left++ {
 		for right := 0; right < size; right++ {
-			pair[left*size+right] = rho[left] * rho[right]
+			value := rho[left] * rho[right]
+			mass[absInt(left-right)] += value
+			total += value
 		}
 	}
-	mass := plan.distanceMass(pair)
+	if total > 0 {
+		for index := range mass {
+			mass[index] /= total
+		}
+	}
 	density := mixturePDF(plan.distanceAxis, plan.distances, mass,
 		bandwidth(plan.distances, mass, plan.config.ObjectiveEffectiveSamples, plan.config.MinimumBandwidth))
 	polarizedMass, weightedDistance := 0.0, 0.0
@@ -288,12 +295,9 @@ func (plan *Plan) calculatePolarization(rho []float64) float64 {
 }
 
 func (plan *Plan) calculateSubjective(edge []float64) float64 {
-	pair := make([]float64, len(edge))
-	degree := float64(plan.config.OutDegree)
-	for index := range pair {
-		pair[index] = edge[index] / degree
-	}
-	mass := plan.distanceMass(pair)
+	// distanceMass normalizes its input, so dividing every edge coordinate by
+	// the common degree first only allocated and copied an unnecessary B^2 slice.
+	mass := plan.distanceMass(edge)
 	effectiveSamples := max(plan.config.Population*plan.config.OutDegree, 1)
 	density := mixturePDF(plan.distanceAxis, plan.distances, mass,
 		bandwidth(plan.distances, mass, effectiveSamples, plan.config.MinimumBandwidth))

@@ -49,12 +49,13 @@ func applyComponentAmbiguity(state *State, request config.RunRequest, kernel []f
 
 func inferredBridgeFractions(state *State) []float64 {
 	adjacency := state.undirectedAdjacencyProbabilities()
+	means := state.commonNeighborMeans(adjacency)
 	result := make([]float64, state.Bins*state.Bins)
 	for source := 0; source < state.Bins; source++ {
 		for target := 0; target < state.Bins; target++ {
 			index := state.matrixIndex(source, target)
 			if state.Edge[index] > numerics.ProbabilityEpsilon {
-				result[index] = 1 / (1 + state.scoreMean(source, target, adjacency))
+				result[index] = 1 / (1 + means[index])
 			}
 		}
 	}
@@ -692,59 +693,25 @@ func sampleEdgeBlocks(state *State, rho []float64, nodeCounts []int, expected []
 
 func transportHistogram(state *State, transition []float64) []float64 {
 	result := make([]float64, len(state.Histogram))
-	for source := 0; source < state.Bins; source++ {
-		for target := 0; target < state.Bins; target++ {
-			weight := transition[state.matrixIndex(source, target)]
-			if weight == 0 {
-				continue
-			}
-			for k := 0; k <= state.Degree; k++ {
-				for d := 0; d <= state.Degree; d++ {
-					for c := 0; c < state.AvailabilityBins; c++ {
-						result[state.histogramIndex(target, k, d, c)] +=
-							weight * state.Histogram[state.histogramIndex(source, k, d, c)]
-					}
-				}
-			}
-		}
-	}
+	columns := (state.Degree + 1) * (state.Degree + 1) * state.AvailabilityBins
+	numerics.ActiveBackend.ApplyDenseTransitionBatch(result, state.Histogram, transition, state.Bins, columns)
 	return result
 }
 
 func transportXi(state *State, transition []float64) []float64 {
 	result := make([]float64, len(state.Xi))
-	matrix := make([]float64, state.Bins*state.Bins)
-	scratch := make([]float64, len(matrix))
-	transported := make([]float64, len(matrix))
-	for available := 0; available < 2; available++ {
-		for score := 0; score <= state.ScoreMax; score++ {
-			for i := 0; i < state.Bins; i++ {
-				for j := 0; j < state.Bins; j++ {
-					matrix[state.matrixIndex(i, j)] = state.Xi[state.xiIndex(i, j, available, score)]
-				}
-			}
-			numerics.ActiveBackend.Sandwich(transported, scratch, matrix, transition, state.Bins)
-			for i := 0; i < state.Bins; i++ {
-				for j := 0; j < state.Bins; j++ {
-					result[state.xiIndex(i, j, available, score)] = transported[state.matrixIndex(i, j)]
-				}
-			}
-		}
-	}
+	numerics.ActiveBackend.TransportMatrixChannels(
+		result, make([]float64, len(result)), state.Xi, transition,
+		state.Bins, 2*(state.ScoreMax+1),
+	)
 	return result
 }
 
 func transportComponents(state *State, transition []float64) []float64 {
 	result := make([]float64, len(state.Components))
-	for source := 0; source < state.Bins; source++ {
-		for target := 0; target < state.Bins; target++ {
-			weight := transition[state.matrixIndex(source, target)]
-			for sizeBin := 0; sizeBin < state.ComponentSizeBins; sizeBin++ {
-				result[state.componentIndex(target, sizeBin)] +=
-					weight * state.Components[state.componentIndex(source, sizeBin)]
-			}
-		}
-	}
+	numerics.ActiveBackend.ApplyDenseTransitionBatch(
+		result, state.Components, transition, state.Bins, state.ComponentSizeBins,
+	)
 	return result
 }
 

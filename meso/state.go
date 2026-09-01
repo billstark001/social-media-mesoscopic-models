@@ -196,13 +196,17 @@ func (s *State) undirectedAdjacencyProbabilities() []float64 {
 	return result
 }
 
-func (s *State) scoreMean(i, j int, adjacency []float64) float64 {
-	mean := 0.0
-	for center := 0; center < s.Bins; center++ {
-		mean += float64(s.Population) * s.Rho[center] *
-			adjacency[s.matrixIndex(i, center)] * adjacency[s.matrixIndex(j, center)]
+func (s *State) commonNeighborMeans(adjacency []float64) []float64 {
+	weights := make([]float64, s.Bins)
+	for center, mass := range s.Rho {
+		weights[center] = float64(s.Population) * mass
 	}
-	return math.Max(mean, 0)
+	result := make([]float64, s.Bins*s.Bins)
+	numerics.ActiveBackend.WeightedGram(result, make([]float64, len(result)), adjacency, weights, s.Bins)
+	for index, value := range result {
+		result[index] = math.Max(value, 0)
+	}
+	return result
 }
 
 func availabilityByScore(pmf []float64, availableFraction, correlation float64) []float64 {
@@ -239,22 +243,23 @@ func availabilityByScore(pmf []float64, availableFraction, correlation float64) 
 
 func (s *State) rebuildScoreState(availabilityCorrelation float64) {
 	adjacency := s.undirectedAdjacencyProbabilities()
-	s.plan.scoreCore(s, adjacency, availabilityCorrelation)
-	s.plan.rebuildWedge(s, adjacency, availabilityCorrelation)
+	means := s.commonNeighborMeans(adjacency)
+	s.plan.scoreCore(s, means, availabilityCorrelation)
+	s.plan.rebuildWedge(s, means, availabilityCorrelation)
 }
 
-func rebuildScoreWithoutXi(s *State, adjacency []float64, availabilityCorrelation float64) {
-	rebuildScoreCore(s, adjacency, availabilityCorrelation, false)
+func rebuildScoreWithoutXi(s *State, means []float64, availabilityCorrelation float64) {
+	rebuildScoreCore(s, means, availabilityCorrelation, false)
 }
 
-func rebuildScoreWithXi(s *State, adjacency []float64, availabilityCorrelation float64) {
+func rebuildScoreWithXi(s *State, means []float64, availabilityCorrelation float64) {
 	clear(s.Xi)
-	rebuildScoreCore(s, adjacency, availabilityCorrelation, true)
+	rebuildScoreCore(s, means, availabilityCorrelation, true)
 }
 
 func rebuildScoreCore(
 	s *State,
-	adjacency []float64,
+	means []float64,
 	availabilityCorrelation float64,
 	storeXi bool,
 ) {
@@ -269,7 +274,7 @@ func rebuildScoreCore(
 			if pairMass > numerics.ProbabilityEpsilon {
 				availableFraction = numerics.Clamp(s.Candidate[index]/pairMass, 0, 1)
 			}
-			pmf := numerics.PoissonPMF(s.scoreMean(i, j, adjacency), s.ScoreMax)
+			pmf := numerics.PoissonPMF(means[index], s.ScoreMax)
 			available := availabilityByScore(pmf, availableFraction, availabilityCorrelation)
 			scoreMoment := 0.0
 			for score, mass := range available {
@@ -288,15 +293,15 @@ func rebuildScoreCore(
 
 func noRebuildWedge(*State, []float64, float64) {}
 
-func rebuildWedgeFromPoisson(s *State, adjacency []float64, availabilityCorrelation float64) {
-	s.rebuildWedge(adjacency, availabilityCorrelation, false)
+func rebuildWedgeFromPoisson(s *State, means []float64, availabilityCorrelation float64) {
+	s.rebuildWedge(means, availabilityCorrelation, false)
 }
 
-func rebuildWedgeFromXi(s *State, adjacency []float64, availabilityCorrelation float64) {
-	s.rebuildWedge(adjacency, availabilityCorrelation, true)
+func rebuildWedgeFromXi(s *State, means []float64, availabilityCorrelation float64) {
+	s.rebuildWedge(means, availabilityCorrelation, true)
 }
 
-func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float64, momentFromXi bool) {
+func (s *State) rebuildWedge(means []float64, availabilityCorrelation float64, momentFromXi bool) {
 	clear(s.Wedge)
 	for center := 0; center < s.Bins; center++ {
 		if s.Rho[center] <= numerics.ProbabilityEpsilon {
@@ -347,7 +352,7 @@ func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float6
 				// Use the same right-censored Poisson law as S_zeta.  Using the
 				// uncensored analytic mean here would make W and S_1 disagree by
 				// exactly the mass accumulated in the last score bin.
-				pmf := numerics.PoissonPMF(s.scoreMean(i, j, adjacency), s.ScoreMax)
+				pmf := numerics.PoissonPMF(means[s.matrixIndex(i, j)], s.ScoreMax)
 				available := availabilityByScore(pmf, availableFraction, availabilityCorrelation)
 				for score, mass := range available {
 					firstMoment += pairMass * mass * float64(score)
@@ -528,6 +533,7 @@ func (s *State) rebuildTopology(request config.RunRequest) {
 	clear(s.Components)
 	neighbors := s.neighborKernel()
 	adjacency := s.undirectedAdjacencyProbabilities()
+	means := s.commonNeighborMeans(adjacency)
 	for i := 0; i < s.Bins; i++ {
 		concordantDegree := 0.0
 		for j := 0; j < s.Bins; j++ {
@@ -542,7 +548,7 @@ func (s *State) rebuildTopology(request config.RunRequest) {
 	}
 	for i := 0; i < s.Bins; i++ {
 		for j := 0; j < s.Bins; j++ {
-			meanScore := s.scoreMean(i, j, adjacency)
+			meanScore := means[s.matrixIndex(i, j)]
 			s.Bridges[s.matrixIndex(i, j)] = s.Edge[s.matrixIndex(i, j)] / (1 + meanScore)
 		}
 	}
