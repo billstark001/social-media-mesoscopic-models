@@ -8,19 +8,24 @@ import (
 	"strings"
 )
 
-func depositNormal(row, axis []float64, mean, variance, weight float64, points int) {
+func depositNormal(
+	row, axis []float64,
+	mean, variance, weight float64,
+	quadrature numerics.NormalQuadrature,
+) {
 	if weight <= 0 {
 		return
 	}
-	if variance <= 1e-16 || points == 1 {
+	if variance <= 1e-16 || len(quadrature.Nodes) == 1 {
 		numerics.DepositLinear(row, axis, mean, weight)
 		return
 	}
 	standardDeviation := math.Sqrt(variance)
-	share := weight / float64(points)
-	for index := 0; index < points; index++ {
-		value := mean + standardDeviation*numerics.QuantileNormal(index, points)
-		numerics.DepositLinear(row, axis, value, share)
+	for index, node := range quadrature.Nodes {
+		value := mean + standardDeviation*node
+		numerics.DepositLinear(
+			row, axis, value, weight*quadrature.Weights[index],
+		)
 	}
 }
 
@@ -37,6 +42,7 @@ func hkTransitionRow(
 	request config.RunRequest,
 	source int,
 	neighborRow, recommendationRow, output []float64,
+	quadrature numerics.NormalQuadrature,
 ) {
 	mask := concordanceMask(state.Axis, state.Axis[source], request.Dynamics.Tolerance)
 	pN, meanN, varianceN := conditionalMoments(neighborRow, state.Axis, mask)
@@ -75,8 +81,10 @@ func hkTransitionRow(
 			destinationMean := (1-request.Dynamics.Influence)*state.Axis[source] +
 				request.Dynamics.Influence*targetMean
 			destinationVariance := request.Dynamics.Influence * request.Dynamics.Influence * averageVariance
-			depositNormal(output, state.Axis, destinationMean, destinationVariance, weight,
-				request.Resolution.OpinionQuadrature)
+			depositNormal(
+				output, state.Axis, destinationMean, destinationVariance, weight,
+				quadrature,
+			)
 		}
 	}
 }
@@ -129,14 +137,29 @@ func deffuantTransitionRow(
 
 // TransitionKernel constructs the synchronous node-bin transition law.
 func TransitionKernel(state *State, request config.RunRequest, neighbors, recommendations []float64) ([]float64, error) {
+	dynamics := strings.ToLower(strings.TrimSpace(request.Dynamics.Type))
+	var quadrature numerics.NormalQuadrature
+	if dynamics == "hk" {
+		var err error
+		quadrature, err = numerics.NewNormalQuadrature(
+			request.Resolution.OpinionQuadratureRule,
+			request.Resolution.OpinionQuadrature,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
 	transition := make([]float64, state.Bins*state.Bins)
 	for source := 0; source < state.Bins; source++ {
 		neighborRow := neighbors[source*state.Bins : (source+1)*state.Bins]
 		recommendationRow := recommendations[source*state.Bins : (source+1)*state.Bins]
 		output := transition[source*state.Bins : (source+1)*state.Bins]
-		switch strings.ToLower(strings.TrimSpace(request.Dynamics.Type)) {
+		switch dynamics {
 		case "hk":
-			hkTransitionRow(state, request, source, neighborRow, recommendationRow, output)
+			hkTransitionRow(
+				state, request, source, neighborRow, recommendationRow, output,
+				quadrature,
+			)
 		case "deffuant":
 			deffuantTransitionRow(state, request, source, neighborRow, recommendationRow, output)
 		default:

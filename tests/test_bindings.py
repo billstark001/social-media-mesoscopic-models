@@ -63,6 +63,7 @@ def request(request_id: str, layer: str, seed: int) -> dict[str, object]:
             "availability_bins": 3,
             "component_size_bins": 3,
             "opinion_quadrature_points": 1,
+            "opinion_quadrature_rule": "unit_variance_quantile",
         },
         "closure": {
             "motif_relaxation": 0.2,
@@ -121,6 +122,7 @@ def kinetic_request(request_id: str, recommender: str) -> dict[str, object]:
         },
         "resolution": {
             "opinion_quadrature_points": 5,
+            "opinion_quadrature_rule": "unit_variance_quantile",
             "confidence_quadrature_points": 5,
             "score_max": 20,
             "distance_grid_size": 64,

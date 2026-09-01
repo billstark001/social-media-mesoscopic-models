@@ -17,8 +17,11 @@ func testRequest(dynamics, method, recommender string) RunRequest {
 		Dynamics:    DynamicsConfig{Type: dynamics, OpinionMethod: method, Tolerance: 0.45, Influence: 0.1, RewiringRate: 0.05},
 		Recommender: RecommenderConfig{Type: recommender, Steepness: 2, RandomRatio: 0.1, OpinionTolerance: 0.4},
 		Initial:     InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: empty},
-		Resolution: ResolutionConfig{OpinionQuadraturePoints: 5, ConfidenceQuadraturePoints: 5,
-			ScoreMax: 20, DistanceGridSize: 64},
+		Resolution: ResolutionConfig{
+			OpinionQuadraturePoints:    5,
+			OpinionQuadratureRule:      numerics.UnitVarianceQuantileRule,
+			ConfidenceQuadraturePoints: 5, ScoreMax: 20, DistanceGridSize: 64,
+		},
 		Observables: ObservablesConfig{
 			Polarization: true, Subjective: true, Homophily: true, HomophilyRaw: true, Pathway: true,
 			PolarizationFirstPassage: true, HomophilyFirstPassage: true,
@@ -230,7 +233,14 @@ func TestHKMeasureRetainsFiniteExposureNoUpdateProbability(t *testing.T) {
 	if math.Abs(moments.Mean[2]-0.2) > 1e-14 || math.Abs(moments.Second[2]-0.1) > 1e-14 {
 		t.Fatalf("finite-exposure moments are mean=%g second=%g", moments.Mean[2], moments.Second[2])
 	}
-	transition := hkReferenceTransition(current, values)
+	quadrature, err := numerics.NewNormalQuadrature(
+		request.Resolution.OpinionQuadratureRule,
+		request.Resolution.OpinionQuadraturePoints,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition := hkReferenceTransition(current, values, quadrature)
 	row := transition[2*request.OpinionBins : 3*request.OpinionBins]
 	destinationMean := 0.0
 	for index, probability := range row {
@@ -242,6 +252,22 @@ func TestHKMeasureRetainsFiniteExposureNoUpdateProbability(t *testing.T) {
 	}
 	if math.Abs(destinationMean-0.08) < 1e-3 {
 		t.Fatal("measure collapsed E[1_{C>0} S/C] to E[S]/E[C]")
+	}
+}
+
+func TestDepositNormalUsesGaussHermiteWeights(t *testing.T) {
+	quadrature, err := numerics.NewNormalQuadrature(numerics.GaussHermiteRule, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	axis := append([]float64(nil), quadrature.Nodes...)
+	row := make([]float64, len(axis))
+	depositNormal(row, axis, quadrature, 0, 1, 6)
+	want := []float64{1, 4, 1}
+	for index := range row {
+		if math.Abs(row[index]-want[index]) > 1e-14 {
+			t.Fatalf("row=%v, want %v", row, want)
+		}
 	}
 }
 

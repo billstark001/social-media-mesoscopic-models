@@ -169,7 +169,8 @@ auditable. A request has this shape:
     "score_max": 45,
     "availability_bins": 11,
     "component_size_bins": 12,
-    "opinion_quadrature_points": 7
+    "opinion_quadrature_points": 7,
+    "opinion_quadrature_rule": "unit_variance_quantile"
   },
   "closure": {
     "motif_relaxation": 0.25,
@@ -198,6 +199,12 @@ auditable. A request has this shape:
 Supported `dynamics.type` values are `hk` and `deffuant`. Supported
 `recommender.type` values are `random`, `opinion_random`, and
 `structure_random`; both weighted recommenders use `steepness`.
+Supported opinion quadrature rules are `unit_variance_quantile` and
+`gauss_hermite`. Both use centered nodes with unit weighted variance before
+linear deposition; a one-point rule is deterministic. The first rule uses
+equal-weight midpoint normal quantiles, while the second uses transformed
+Gauss--Hermite nodes and nonuniform weights. Lifted and kinetic requests use
+the same rules and implementation.
 `noise_std` and `noise_quadrature_points` affect `opinion_random`. They are
 explicit but inert for `random` and `structure_random`, matching the microscopic
 weighted StructureRandom implementation, which samples from unperturbed raw

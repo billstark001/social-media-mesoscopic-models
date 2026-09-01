@@ -17,9 +17,12 @@ func validRequest() RunRequest {
 			Type: "structure_random", Steepness: 1, RandomRatio: 0,
 			OpinionTolerance: 0.4, NoiseStd: 0, NoiseQuadraturePoints: 3,
 		},
-		Initial:    InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
-		Resolution: ResolutionConfig{ScoreMax: 8, AvailabilityBins: 5, ComponentSizeBins: 5, OpinionQuadrature: 3},
-		Closure:    ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
+		Initial: InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
+		Resolution: ResolutionConfig{
+			ScoreMax: 8, AvailabilityBins: 5, ComponentSizeBins: 5,
+			OpinionQuadrature: 3, OpinionQuadratureRule: "unit_variance_quantile",
+		},
+		Closure: ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
 		FastSlow: FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
 			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
 		Ambiguity: AmbiguityConfig{

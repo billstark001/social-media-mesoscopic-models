@@ -8,7 +8,7 @@ import (
 type transitionBuilder func(*state, fields) (*numerics.SparseTransition, error)
 
 func planMeasureTransition(request RunRequest) transitionBuilder {
-	var reference func(*state, fields) []float64
+	var reference func(*state, fields, numerics.NormalQuadrature) []float64
 	switch normalize(request.Dynamics.Type) {
 	case "hk":
 		reference = hkReferenceTransition
@@ -17,51 +17,43 @@ func planMeasureTransition(request RunRequest) transitionBuilder {
 	default:
 		panic("validated dynamics was not dispatched")
 	}
+	quadrature, quadratureErr := numerics.NewNormalQuadrature(
+		request.Resolution.OpinionQuadratureRule,
+		request.Resolution.OpinionQuadraturePoints,
+	)
 	return func(current *state, values fields) (*numerics.SparseTransition, error) {
-		return numerics.DenseToSparse(reference(current, values), current.request.OpinionBins)
+		if quadratureErr != nil {
+			return nil, quadratureErr
+		}
+		return numerics.DenseToSparse(
+			reference(current, values, quadrature), current.request.OpinionBins,
+		)
 	}
 }
 
-func quadratureNodes(count int) []float64 {
-	result := make([]float64, count)
-	if count == 1 {
-		return result
-	}
-	mean := 0.0
-	for index := range result {
-		result[index] = numerics.QuantileNormal(index, count)
-		mean += result[index]
-	}
-	mean /= float64(count)
-	variance := 0.0
-	for index := range result {
-		result[index] -= mean
-		variance += result[index] * result[index]
-	}
-	variance /= float64(count)
-	scale := 1 / math.Sqrt(variance)
-	for index := range result {
-		result[index] *= scale
-	}
-	return result
-}
-
-func depositNormal(row []float64, axis, nodes []float64, mean, variance, mass float64) {
-	if variance <= 1e-18 || len(nodes) == 1 {
+func depositNormal(
+	row, axis []float64,
+	quadrature numerics.NormalQuadrature,
+	mean, variance, mass float64,
+) {
+	if variance <= 1e-18 || len(quadrature.Nodes) == 1 {
 		numerics.DepositUniformLinear(row, axis, mean, mass)
 		return
 	}
 	standardDeviation := math.Sqrt(variance)
-	weight := mass / float64(len(nodes))
-	for _, node := range nodes {
-		numerics.DepositUniformLinear(row, axis, mean+standardDeviation*node, weight)
+	for index, node := range quadrature.Nodes {
+		numerics.DepositUniformLinear(
+			row, axis, mean+standardDeviation*node,
+			mass*quadrature.Weights[index],
+		)
 	}
 }
 
-func hkReferenceTransition(current *state, values fields) []float64 {
+func hkReferenceTransition(
+	current *state, values fields, quadrature numerics.NormalQuadrature,
+) []float64 {
 	size := current.request.OpinionBins
 	result := make([]float64, size*size)
-	nodes := quadratureNodes(current.request.Resolution.OpinionQuadraturePoints)
 	degreePMF := make([][]float64, size)
 	recommendationPMF := make([][]float64, size)
 	for source := 0; source < size; source++ {
@@ -86,7 +78,10 @@ func hkReferenceTransition(current *state, values fields) []float64 {
 				count := float64(totalCount)
 				meanDisplacement := (float64(neighborCount)*neighborMean + float64(recommendationCount)*recommendationMean) / count
 				variance := (float64(neighborCount)*neighborVariance + float64(recommendationCount)*recommendationVariance) / (count * count)
-				depositNormal(row, current.grid.Axis, nodes, opinion+alpha*meanDisplacement, alpha*alpha*variance, probability)
+				depositNormal(
+					row, current.grid.Axis, quadrature,
+					opinion+alpha*meanDisplacement, alpha*alpha*variance, probability,
+				)
 			}
 		}
 		numerics.NormalizeInPlace(row, nil)
@@ -94,7 +89,14 @@ func hkReferenceTransition(current *state, values fields) []float64 {
 	return result
 }
 
-func addDeffuantChannel(row []float64, current *state, channel exposureChannel, source int, coefficient float64, nodes []float64) {
+func addDeffuantChannel(
+	row []float64,
+	current *state,
+	channel exposureChannel,
+	source int,
+	coefficient float64,
+	quadrature numerics.NormalQuadrature,
+) {
 	if coefficient <= 0 || channel.ConcordantMass[source] <= 1e-15 {
 		return
 	}
@@ -110,16 +112,17 @@ func addDeffuantChannel(row []float64, current *state, channel exposureChannel, 
 		meanDisplacement := current.grid.Displacement[pair] / concordance
 		second := current.grid.DisplacementSecond[pair] / concordance
 		variance := math.Max(second-meanDisplacement*meanDisplacement, 0)
-		depositNormal(row, current.grid.Axis, nodes,
+		depositNormal(row, current.grid.Axis, quadrature,
 			current.grid.Axis[source]+alpha*meanDisplacement,
 			alpha*alpha*variance, coefficient*pairMass)
 	}
 }
 
-func deffuantReferenceTransition(current *state, values fields) []float64 {
+func deffuantReferenceTransition(
+	current *state, values fields, quadrature numerics.NormalQuadrature,
+) []float64 {
 	size := current.request.OpinionBins
 	result := make([]float64, size*size)
-	nodes := quadratureNodes(current.request.Resolution.OpinionQuadraturePoints)
 	for source := 0; source < size; source++ {
 		neighborPMF := numerics.BinomialPMF(current.request.OutDegree, values.Neighbors.ConcordantMass[source])
 		recommendationPMF := numerics.BinomialPMF(current.request.RecommendationCount, values.Recommendations.ConcordantMass[source])
@@ -138,8 +141,13 @@ func deffuantReferenceTransition(current *state, values fields) []float64 {
 		}
 		row := result[source*size : (source+1)*size]
 		numerics.DepositUniformLinear(row, current.grid.Axis, current.grid.Axis[source], stay)
-		addDeffuantChannel(row, current, values.Neighbors, source, neighborCoefficient, nodes)
-		addDeffuantChannel(row, current, values.Recommendations, source, recommendationCoefficient, nodes)
+		addDeffuantChannel(
+			row, current, values.Neighbors, source, neighborCoefficient, quadrature,
+		)
+		addDeffuantChannel(
+			row, current, values.Recommendations, source,
+			recommendationCoefficient, quadrature,
+		)
 		numerics.NormalizeInPlace(row, nil)
 	}
 	return result

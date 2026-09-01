@@ -34,10 +34,11 @@ type InitialConfig struct {
 }
 
 type ResolutionConfig struct {
-	OpinionQuadraturePoints    int `json:"opinion_quadrature_points"`
-	ConfidenceQuadraturePoints int `json:"confidence_quadrature_points"`
-	ScoreMax                   int `json:"score_max"`
-	DistanceGridSize           int `json:"distance_grid_size"`
+	OpinionQuadraturePoints    int    `json:"opinion_quadrature_points"`
+	OpinionQuadratureRule      string `json:"opinion_quadrature_rule"`
+	ConfidenceQuadraturePoints int    `json:"confidence_quadrature_points"`
+	ScoreMax                   int    `json:"score_max"`
+	DistanceGridSize           int    `json:"distance_grid_size"`
 }
 
 type ObservablesConfig struct {
@@ -101,6 +102,7 @@ var requiredPaths = [][]string{
 	{"initial", "probabilities", "encoding"},
 	{"initial", "probabilities", "shape"}, {"initial", "probabilities", "data"},
 	{"resolution", "opinion_quadrature_points"},
+	{"resolution", "opinion_quadrature_rule"},
 	{"resolution", "confidence_quadrature_points"},
 	{"resolution", "score_max"}, {"resolution", "distance_grid_size"},
 	{"observables", "polarization"}, {"observables", "subjective"},
@@ -231,6 +233,9 @@ func (request RunRequest) Validate() error {
 	}
 	if request.Resolution.OpinionQuadraturePoints < 1 || request.Resolution.ConfidenceQuadraturePoints < 1 || request.Resolution.ScoreMax < 1 || request.Resolution.DistanceGridSize < 3 {
 		return errors.New("quadrature points and score_max must be positive; distance_grid_size must be >=3")
+	}
+	if err := numerics.CheckNormalQuadratureRule(request.Resolution.OpinionQuadratureRule); err != nil {
+		return err
 	}
 	if request.Observables.MinimumBandwidth <= 0 || request.Observables.ObjectiveEffectiveSamples < 1 {
 		return errors.New("minimum_bandwidth and objective_effective_samples must be positive")

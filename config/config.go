@@ -83,10 +83,11 @@ type InitialConfig struct {
 }
 
 type ResolutionConfig struct {
-	ScoreMax          int `json:"score_max"`
-	AvailabilityBins  int `json:"availability_bins"`
-	ComponentSizeBins int `json:"component_size_bins"`
-	OpinionQuadrature int `json:"opinion_quadrature_points"`
+	ScoreMax              int    `json:"score_max"`
+	AvailabilityBins      int    `json:"availability_bins"`
+	ComponentSizeBins     int    `json:"component_size_bins"`
+	OpinionQuadrature     int    `json:"opinion_quadrature_points"`
+	OpinionQuadratureRule string `json:"opinion_quadrature_rule"`
 }
 
 type ClosureConfig struct {
@@ -154,6 +155,7 @@ var requiredPaths = [][]string{
 	{"resolution", "score_max"}, {"resolution", "availability_bins"},
 	{"resolution", "component_size_bins"},
 	{"resolution", "opinion_quadrature_points"},
+	{"resolution", "opinion_quadrature_rule"},
 	{"closure", "motif_relaxation"}, {"closure", "histogram_relaxation"},
 	{"closure", "candidate_relaxation"}, {"closure", "topology_relaxation"},
 	{"fast_slow", "mode"}, {"fast_slow", "ratio_threshold"},
@@ -306,6 +308,9 @@ func (r RunRequest) Validate() error {
 	if r.Resolution.ScoreMax < 1 || r.Resolution.AvailabilityBins < 2 ||
 		r.Resolution.ComponentSizeBins < 2 || r.Resolution.OpinionQuadrature < 1 {
 		return errors.New("all resolution counts must be positive; availability and component bins must be >=2")
+	}
+	if err := numerics.CheckNormalQuadratureRule(r.Resolution.OpinionQuadratureRule); err != nil {
+		return err
 	}
 	for name, value := range map[string]float64{
 		"closure.motif_relaxation":     r.Closure.MotifRelaxation,

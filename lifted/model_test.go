@@ -127,9 +127,13 @@ func testRequest() config.RunRequest {
 			Type: "structure_random", Steepness: 1, RandomRatio: 0,
 			OpinionTolerance: 0.4, NoiseStd: 0, NoiseQuadraturePoints: 3,
 		},
-		Initial:    config.InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
-		Resolution: config.ResolutionConfig{ScoreMax: 8, AvailabilityBins: 5, ComponentSizeBins: 5, OpinionQuadrature: 3},
-		Closure:    config.ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
+		Initial: config.InitialConfig{Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{}},
+		Resolution: config.ResolutionConfig{
+			ScoreMax: 8, AvailabilityBins: 5, ComponentSizeBins: 5,
+			OpinionQuadrature:     3,
+			OpinionQuadratureRule: numerics.UnitVarianceQuantileRule,
+		},
+		Closure: config.ClosureConfig{MotifRelaxation: 0.2, HistogramRelaxation: 0.2, CandidateRelaxation: 0.2, TopologyRelaxation: 0.2},
 		FastSlow: config.FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
 			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
 		Ambiguity: config.AmbiguityConfig{
@@ -226,6 +230,22 @@ func TestRecommendationRowsAndSteps(t *testing.T) {
 			if _, err := Step(state, request, ClosureProfile{}, rand.New(rand.NewPCG(5, 6))); err != nil {
 				t.Fatalf("%s/%s: %v", dynamics, recommender, err)
 			}
+		}
+	}
+}
+
+func TestDepositNormalUsesGaussHermiteWeights(t *testing.T) {
+	quadrature, err := numerics.NewNormalQuadrature(numerics.GaussHermiteRule, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	axis := append([]float64(nil), quadrature.Nodes...)
+	row := make([]float64, len(axis))
+	depositNormal(row, axis, 0, 1, 6, quadrature)
+	want := []float64{1, 4, 1}
+	for index := range row {
+		if math.Abs(row[index]-want[index]) > 1e-14 {
+			t.Fatalf("row=%v, want %v", row, want)
 		}
 	}
 }
