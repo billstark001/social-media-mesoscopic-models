@@ -1,16 +1,25 @@
 # social-media-mesoscopic-models
 
-Finite-`N` stochastic mesoscopic terminal-probability solver for the social
-media opinion model. The implementation is deliberately split into ordinary
-Go packages (there is no `internal` tree):
+Go runtimes for two mesoscopic reductions of the social-media opinion model:
+
+- `smp-lifted`: finite-`N` stochastic lifted terminal probabilities;
+- `smp-kinetic`: deterministic measure or strong-form Fokker--Planck
+  evolution with online density observables and no full-trajectory output.
+
+The implementation is deliberately split into ordinary Go packages (there is
+no `internal` tree):
 
 - `config`: strict, explicit request schema and validation;
-- `numerics`: probability utilities and optional dense BLAS contractions;
+- `numerics`: probability utilities, sparse/dense transport, batched
+  tridiagonal solves, and optional BLAS contractions;
 - `meso`: the six nested retained states, unsplit law, and conditional fast-absorption law;
-- `solver`: path ensembles, absorbing terminal categories, and uncertainty
+- `solver`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
+- `kinetic`: nonlocal measure and finite-volume Fokker--Planck dynamics;
+- `kinetic/statistics`: requested-only online density observables;
 - `protocol`: recoverable JSONL batch transport;
-- `cmd/smp-meso`: the small command-line adapter.
+- `command`: the shared run/batch command adapter;
+- `cmd/smp-lifted` and `cmd/smp-kinetic`: thin executable adapters.
 
 The Python package `smp_meso_bindings` builds and orchestrates the Go binary.
 It sends all parameter points in one JSONL stream, so a scan does not create a
@@ -72,14 +81,16 @@ vector so downstream audits can reconstruct the envelope.
 The dependency-free build uses the native Go contraction loops:
 
 ```sh
-go build -o bin/smp-meso ./cmd/smp-meso
+go build -o bin/smp-lifted ./cmd/smp-lifted
+go build -o bin/smp-kinetic ./cmd/smp-kinetic
 go test ./...
 ```
 
 On macOS, Accelerate is optional:
 
 ```sh
-go build -tags accelerate -o bin/smp-meso ./cmd/smp-meso
+go build -tags accelerate -o bin/smp-lifted ./cmd/smp-lifted
+go build -tags accelerate -o bin/smp-kinetic ./cmd/smp-kinetic
 go test -tags accelerate ./...
 ```
 
@@ -91,13 +102,14 @@ linker flags:
 OPENBLAS_PREFIX="$(brew --prefix openblas)"
 CGO_CFLAGS="-I${OPENBLAS_PREFIX}/include" \
 CGO_LDFLAGS="-L${OPENBLAS_PREFIX}/lib -lopenblas" \
-go build -tags openblas -o bin/smp-meso ./cmd/smp-meso
+go build -tags openblas -o bin/smp-lifted ./cmd/smp-lifted
+go build -tags openblas -o bin/smp-kinetic ./cmd/smp-kinetic
 ```
 
 The `openblas` and `accelerate` tags are mutually exclusive. Backend selection
 changes only dense contractions, not the model or random streams.
 
-## Request and CLI
+## Lifted request
 
 No model or numerical parameter is defaulted. Even parameters irrelevant to a
 selected recommender must be present; this makes saved requests complete and
@@ -189,8 +201,8 @@ Run one JSON object or a batch of newline-delimited objects. The quiet form
 keeps stdout as result-only JSON/JSONL:
 
 ```sh
-bin/smp-meso run @request.json
-bin/smp-meso batch < requests.jsonl > responses.jsonl
+bin/smp-lifted run @request.json
+bin/smp-lifted batch < requests.jsonl > responses.jsonl
 ```
 
 A malformed item in batch mode yields an error response for that line and does
@@ -201,8 +213,8 @@ terminal; `jsonl` is stable machine-readable telemetry. A positive heartbeat
 interval additionally reports paths that have not yet terminated:
 
 ```sh
-bin/smp-meso run --progress human --progress-step-interval 1000 @request.json
-bin/smp-meso batch --progress jsonl --progress-step-interval 1000 \
+bin/smp-lifted run --progress human --progress-step-interval 1000 @request.json
+bin/smp-kinetic batch --progress jsonl --progress-step-interval 1000 \
   < requests.jsonl > responses.jsonl 2> progress.jsonl
 ```
 
@@ -210,15 +222,70 @@ Events identify the request and batch line, point/interval stage, interval
 scenario, completed paths, last terminal category, elapsed time, and periodic
 within-path step. Enabling telemetry does not change random streams.
 
+## Kinetic request
+
+Kinetic requests select `dynamics.opinion_method` as either `measure` or
+`fokker_planck`. `measure` applies the complete nonlocal finite-exposure
+push-forward. `fokker_planck` derives drift and diffusion from the same
+finite-exposure first two moments and advances a conservative no-flux finite
+volume system. Initial categorical densities and every returned scalar series
+use `base64+zlib+f64le`; JSON numerical arrays are not part of the kinetic API.
+Only requested observables are evaluated, and full `rho`, `edge`, and wedge
+trajectories never cross the process boundary.
+
+Selected state inspection is a separate opt-in interface. The required
+`snapshots` block contains binary-encoded `record_steps` plus independent
+`rho`, `edge`, `velocity`, and `rewiring_flux` switches. Returned snapshot
+fields use the same compressed binary encoding and include only those steps.
+When every switch is false, `record_steps` has shape `0`; the solver creates no
+snapshot collector and performs no trajectory copies. This keeps scalar scans
+on the original allocation path while supporting reproducible field figures.
+
+### Frozen drift-landscape semantics
+
+The snapshot `velocity` is the actual finite-exposure first-moment drift. For
+HK it includes the no-update event and has the coefficient-bearing convention
+
+```text
+v(x,t) = influence * E[1_{C>0} S/C].
+```
+
+It is deliberately not the historical ratio-of-expectations closure
+`influence * E[S] / E[C]`, which conditions away the probability of seeing no
+concordant item. Downstream landscape analysis removes the update coefficient,
+defines `F = velocity / influence`, reconstructs `V` from `F = -dV/dx`, and
+defines a drift barrier between an unstable zero `x_s` and an adjacent stable
+zero `x_w` by
+
+```text
+Delta V_drift = V(x_s) - V(x_w) = integral_[x_s,x_w] F(x) dx.
+```
+
+This definition is frozen for comparisons between `measure` and
+`fokker_planck`. It is a coefficient-free effective drift diagnostic, not a
+general escape or quasipotential: the measure operator is nonlocal, and the
+Fokker--Planck operator also contains spatially varying endogenous diffusion.
+The solver therefore returns the requested drift field but does not report a
+scalar barrier. Analysis code must identify the relevant stable/unstable pair;
+`max(V)-min(V)` is equivalent only in special symmetric two-well cases. Cells
+with negligible `rho` describe an explicitly counterfactual drift extension
+and should be reported as low-support when a barrier passes through them.
+
+Kinetic `structure_random_l0` powers the pair-level overlap proxy. The distinct
+`structure_random_l1` path transports four directional wedge channels, converts
+their score mass to a finite-population common-neighbor mean, and uses the
+capped Poisson moment `E[min(C, score_max)^steepness]`. Thus `steepness=1`
+recovers the transported first score moment, while larger steepness values use
+an explicit distributional closure instead of taking a power of that mean.
+
 ## Python orchestration
 
 Install from the repository, including editable installation:
 
 ```sh
 python -m pip install -e .
-smp-meso-build --backend purego
-# or: smp-meso-build --backend accelerate
-# or: smp-meso-build --backend openblas
+smp-mesoscopic-build --command lifted --backend purego
+smp-mesoscopic-build --command kinetic --backend accelerate
 ```
 
 Then reuse one Go process for a list of requests:
@@ -227,13 +294,13 @@ Then reuse one Go process for a list of requests:
 from smp_meso_bindings import (
     build_binary,
     print_progress,
-    run_batch,
-    run_batch_parallel,
+    run_kinetic_batch,
+    run_lifted_batch_parallel,
 )
 
-binary = build_binary(backend="accelerate")
-responses = run_batch(
-    binary,
+kinetic_binary = build_binary(command_name="kinetic", backend="accelerate")
+responses = run_kinetic_batch(
+    kinetic_binary,
     requests,
     progress=print_progress,
     progress_step_interval=1000,
@@ -242,8 +309,9 @@ responses = run_batch(
 # Four long-lived Go batch processes with dynamic request scheduling;
 # response order remains input order.
 # Set each request's explicit workers value with the total CPU budget in mind.
-responses = run_batch_parallel(
-    binary,
+lifted_binary = build_binary(command_name="lifted", backend="accelerate")
+responses = run_lifted_batch_parallel(
+    lifted_binary,
     requests,
     4,
     progress=print_progress,
@@ -251,9 +319,9 @@ responses = run_batch_parallel(
 )
 ```
 
-`run_batch(..., check=False)` returns both successful and error responses;
+The corresponding runner's `check=False` returns both successful and error responses;
 the default raises `BatchExecutionError` after collecting the complete batch.
-`run_batch` remains the clean single-process execution path. The parallel
+Each `*_batch` function is the clean single-process execution path. The parallel
 orchestrator uses Python threads only to supervise independent Go processes;
 the numerical work remains in Go. A free process pulls the next parameter point
 from a shared queue, avoiding the long tail of a static partition when hitting
