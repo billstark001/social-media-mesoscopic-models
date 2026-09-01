@@ -39,6 +39,11 @@ powers preserve the pre-rewiring conditional shape factor
 `S_zeta / S_1^zeta`. Candidate and topology states instead project `C`,
 `S_zeta`, and the first moment of `W` from the richer `Xi` coordinate.
 
+Layer-dependent work is resolved once per simulated path by a cumulative
+layer plan. Each successive plan inherits its predecessor and replaces only
+the newly refined numerical stages, so plan definitions do not repeat and
+the time-critical kernels contain no per-coordinate layer checks.
+
 The request also selects `fast_slow.mode`. `unsplit` applies the ordinary
 synchronous generator. `conditional_absorption` is activated only when
 `rewiring_rate / influence` reaches the explicit `ratio_threshold`; at fixed

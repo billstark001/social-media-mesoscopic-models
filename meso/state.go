@@ -30,6 +30,7 @@ type ClosureProfile struct {
 
 type State struct {
 	Layer             Layer
+	plan              *layerPlan
 	Population        int
 	Bins              int
 	Degree            int
@@ -53,8 +54,9 @@ type State struct {
 
 func newEmptyState(request config.RunRequest, layer Layer) *State {
 	bins := request.OpinionBins
+	plan := mustPlanFor(layer)
 	state := &State{
-		Layer: layer, Population: request.Population, Bins: bins,
+		Layer: plan.layer, plan: plan, Population: request.Population, Bins: bins,
 		Degree: request.OutDegree, Recommendations: request.RecommendationCount,
 		ScoreMax:          request.Resolution.ScoreMax,
 		AvailabilityBins:  request.Resolution.AvailabilityBins,
@@ -72,20 +74,7 @@ func newEmptyState(request config.RunRequest, layer Layer) *State {
 	for i := range state.Axis {
 		state.Axis[i] = request.Initial.OpinionMin + (float64(i)+0.5)*dx
 	}
-	if layer >= LayerWedge {
-		state.Wedge = make([]float64, bins*bins*bins)
-	}
-	if layer >= LayerHistogram {
-		state.Histogram = make([]float64,
-			bins*(request.OutDegree+1)*(request.OutDegree+1)*request.Resolution.AvailabilityBins)
-	}
-	if layer >= LayerCandidate {
-		state.Xi = make([]float64, bins*bins*2*(request.Resolution.ScoreMax+1))
-	}
-	if layer >= LayerTopology {
-		state.Components = make([]float64, bins*request.Resolution.ComponentSizeBins)
-		state.Bridges = make([]float64, bins*bins)
-	}
+	state.plan.allocate(state, request)
 	return state
 }
 
@@ -135,6 +124,9 @@ func InitialState(request config.RunRequest, layer Layer, profile ClosureProfile
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
+	if _, err := planFor(layer); err != nil {
+		return nil, err
+	}
 	state := newEmptyState(request, layer)
 	probabilities := initialProbabilities(request)
 	nodeCounts := make([]int, state.Bins)
@@ -152,13 +144,8 @@ func InitialState(request config.RunRequest, layer Layer, profile ClosureProfile
 	}
 	state.rebuildCandidate()
 	state.rebuildScoreState(profile.ScoreAvailability)
-	if layer >= LayerHistogram {
-		if err := state.rebuildHistogram(request, profile.EligibilityCorrelation); err != nil {
-			return nil, err
-		}
-	}
-	if layer >= LayerTopology {
-		state.rebuildTopology(request)
+	if err := state.plan.initializeAuxiliary(state, request, profile); err != nil {
+		return nil, err
 	}
 	if err := state.Validate(); err != nil {
 		return nil, err
@@ -252,9 +239,25 @@ func availabilityByScore(pmf []float64, availableFraction, correlation float64) 
 
 func (s *State) rebuildScoreState(availabilityCorrelation float64) {
 	adjacency := s.undirectedAdjacencyProbabilities()
-	if s.Layer >= LayerCandidate {
-		clear(s.Xi)
-	}
+	s.plan.scoreCore(s, adjacency, availabilityCorrelation)
+	s.plan.rebuildWedge(s, adjacency, availabilityCorrelation)
+}
+
+func rebuildScoreWithoutXi(s *State, adjacency []float64, availabilityCorrelation float64) {
+	rebuildScoreCore(s, adjacency, availabilityCorrelation, false)
+}
+
+func rebuildScoreWithXi(s *State, adjacency []float64, availabilityCorrelation float64) {
+	clear(s.Xi)
+	rebuildScoreCore(s, adjacency, availabilityCorrelation, true)
+}
+
+func rebuildScoreCore(
+	s *State,
+	adjacency []float64,
+	availabilityCorrelation float64,
+	storeXi bool,
+) {
 	for i := 0; i < s.Bins; i++ {
 		for j := 0; j < s.Bins; j++ {
 			index := s.matrixIndex(i, j)
@@ -273,7 +276,7 @@ func (s *State) rebuildScoreState(availabilityCorrelation float64) {
 				if score > 0 {
 					scoreMoment += mass * math.Pow(float64(score), s.Steepness)
 				}
-				if s.Layer >= LayerCandidate {
+				if storeXi {
 					s.Xi[s.xiIndex(i, j, 1, score)] = pairMass * mass
 					s.Xi[s.xiIndex(i, j, 0, score)] = pairMass * math.Max(pmf[score]-mass, 0)
 				}
@@ -281,12 +284,19 @@ func (s *State) rebuildScoreState(availabilityCorrelation float64) {
 			s.Score[index] = pairMass * scoreMoment
 		}
 	}
-	if s.Layer >= LayerWedge {
-		s.rebuildWedge(adjacency, availabilityCorrelation)
-	}
 }
 
-func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float64) {
+func noRebuildWedge(*State, []float64, float64) {}
+
+func rebuildWedgeFromPoisson(s *State, adjacency []float64, availabilityCorrelation float64) {
+	s.rebuildWedge(adjacency, availabilityCorrelation, false)
+}
+
+func rebuildWedgeFromXi(s *State, adjacency []float64, availabilityCorrelation float64) {
+	s.rebuildWedge(adjacency, availabilityCorrelation, true)
+}
+
+func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float64, momentFromXi bool) {
 	clear(s.Wedge)
 	for center := 0; center < s.Bins; center++ {
 		if s.Rho[center] <= numerics.ProbabilityEpsilon {
@@ -321,7 +331,7 @@ func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float6
 	for i := 0; i < s.Bins; i++ {
 		for j := 0; j < s.Bins; j++ {
 			firstMoment := 0.0
-			if s.Layer >= LayerCandidate {
+			if momentFromXi {
 				for score := 1; score <= s.ScoreMax; score++ {
 					firstMoment += float64(score) * s.Xi[s.xiIndex(i, j, 1, score)]
 				}
@@ -362,9 +372,6 @@ func (s *State) rebuildWedge(adjacency []float64, availabilityCorrelation float6
 }
 
 func (s *State) projectXi() {
-	if s.Layer < LayerCandidate {
-		return
-	}
 	clear(s.Candidate)
 	clear(s.Score)
 	for i := 0; i < s.Bins; i++ {
@@ -402,9 +409,6 @@ func (s *State) xiFirstMoment(i, j int) float64 {
 // consistent. Xi is the richer coordinate, so its first score moment is
 // authoritative; W retains its centre allocation whenever it has mass.
 func (s *State) reconcileWedgeToXi() {
-	if s.Layer < LayerCandidate {
-		return
-	}
 	for i := 0; i < s.Bins; i++ {
 		for j := 0; j < s.Bins; j++ {
 			desired := s.xiFirstMoment(i, j)
@@ -468,9 +472,6 @@ func frechetJoint(left, right []float64, correlation float64) []float64 {
 }
 
 func (s *State) rebuildHistogram(request config.RunRequest, correlation float64) error {
-	if s.Layer < LayerHistogram {
-		return nil
-	}
 	clear(s.Histogram)
 	neighbors := s.neighborKernel()
 	recommendations, err := RecommendationKernel(s, request)
@@ -500,8 +501,16 @@ func (s *State) rebuildHistogram(request config.RunRequest, correlation float64)
 	return nil
 }
 
+func initializeHistogram(
+	state *State,
+	request config.RunRequest,
+	profile ClosureProfile,
+) error {
+	return state.rebuildHistogram(request, profile.EligibilityCorrelation)
+}
+
 func (s *State) histogramEligibility(source int) float64 {
-	if s.Layer < LayerHistogram || s.Rho[source] <= numerics.ProbabilityEpsilon {
+	if s.Rho[source] <= numerics.ProbabilityEpsilon {
 		return 0
 	}
 	eligible := 0.0
@@ -516,9 +525,6 @@ func (s *State) histogramEligibility(source int) float64 {
 }
 
 func (s *State) rebuildTopology(request config.RunRequest) {
-	if s.Layer < LayerTopology {
-		return
-	}
 	clear(s.Components)
 	neighbors := s.neighborKernel()
 	adjacency := s.undirectedAdjacencyProbabilities()
@@ -542,7 +548,17 @@ func (s *State) rebuildTopology(request config.RunRequest) {
 	}
 }
 
+func initializeTopology(state *State, request config.RunRequest) {
+	state.rebuildTopology(request)
+}
+
 func (s *State) Validate() error {
+	if s.plan == nil {
+		return fmt.Errorf("state has no layer plan")
+	}
+	if s.plan.layer != s.Layer {
+		return fmt.Errorf("state layer %s does not match plan layer %s", s.Layer, s.plan.layer)
+	}
 	for name, values := range map[string][]float64{
 		"rho": s.Rho, "edge": s.Edge, "candidate": s.Candidate,
 		"score": s.Score, "wedge": s.Wedge, "histogram": s.Histogram,
@@ -566,49 +582,69 @@ func (s *State) Validate() error {
 		if math.Abs(row-expected) > 1e-8 {
 			return fmt.Errorf("edge row %d has mass %.16g, expected %.16g", i, row, expected)
 		}
-		if s.Layer >= LayerHistogram {
-			histogramMass := 0.0
-			for k := 0; k <= s.Degree; k++ {
-				for d := 0; d <= s.Degree; d++ {
-					for c := 0; c < s.AvailabilityBins; c++ {
-						histogramMass += s.Histogram[s.histogramIndex(i, k, d, c)]
-					}
-				}
-			}
-			if math.Abs(histogramMass-s.Rho[i]) > 1e-8 {
-				return fmt.Errorf("histogram bin %d has mass %.16g, expected %.16g", i, histogramMass, s.Rho[i])
-			}
-		}
-		if s.Layer >= LayerTopology {
-			componentMass := numerics.Sum(s.Components[i*s.ComponentSizeBins : (i+1)*s.ComponentSizeBins])
-			if math.Abs(componentMass-s.Rho[i]) > 1e-8 {
-				return fmt.Errorf("component bin %d has mass %.16g, expected %.16g", i, componentMass, s.Rho[i])
-			}
-		}
 	}
-	if err := s.validateWedgeProjection(); err != nil {
+	if err := s.plan.validateHistogram(s); err != nil {
+		return err
+	}
+	if err := s.plan.validateTopology(s); err != nil {
+		return err
+	}
+	if err := s.plan.validateWedge(s); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *State) validateWedgeProjection() error {
-	if s.Layer >= LayerWedge {
-		for i := 0; i < s.Bins; i++ {
-			for j := 0; j < s.Bins; j++ {
-				projected := s.wedgeFirstMoment(i, j)
-				desired := projected
-				switch {
-				case s.Layer >= LayerCandidate:
-					desired = s.xiFirstMoment(i, j)
-				case math.Abs(s.Steepness-1) <= 1e-12:
-					desired = s.Score[s.matrixIndex(i, j)]
-				default:
-					continue
+func validateHistogramMass(state *State) error {
+	for i := 0; i < state.Bins; i++ {
+		histogramMass := 0.0
+		for k := 0; k <= state.Degree; k++ {
+			for d := 0; d <= state.Degree; d++ {
+				for c := 0; c < state.AvailabilityBins; c++ {
+					histogramMass += state.Histogram[state.histogramIndex(i, k, d, c)]
 				}
-				if math.Abs(projected-desired) > 1e-7*math.Max(1, desired) {
-					return fmt.Errorf("wedge (%d,%d) projects to %.16g, expected %.16g", i, j, projected, desired)
-				}
+			}
+		}
+		if math.Abs(histogramMass-state.Rho[i]) > 1e-8 {
+			return fmt.Errorf("histogram bin %d has mass %.16g, expected %.16g", i, histogramMass, state.Rho[i])
+		}
+	}
+	return nil
+}
+
+func validateTopologyMass(state *State) error {
+	for i := 0; i < state.Bins; i++ {
+		componentMass := numerics.Sum(
+			state.Components[i*state.ComponentSizeBins : (i+1)*state.ComponentSizeBins],
+		)
+		if math.Abs(componentMass-state.Rho[i]) > 1e-8 {
+			return fmt.Errorf("component bin %d has mass %.16g, expected %.16g", i, componentMass, state.Rho[i])
+		}
+	}
+	return nil
+}
+
+func validateWedgeAgainstScore(state *State) error {
+	if math.Abs(state.Steepness-1) > 1e-12 {
+		return nil
+	}
+	return validateWedgeProjection(state, false)
+}
+
+func validateWedgeAgainstXi(state *State) error {
+	return validateWedgeProjection(state, true)
+}
+
+func validateWedgeProjection(state *State, againstXi bool) error {
+	for i := 0; i < state.Bins; i++ {
+		for j := 0; j < state.Bins; j++ {
+			projected := state.wedgeFirstMoment(i, j)
+			desired := state.Score[state.matrixIndex(i, j)]
+			if againstXi {
+				desired = state.xiFirstMoment(i, j)
+			}
+			if math.Abs(projected-desired) > 1e-7*math.Max(1, desired) {
+				return fmt.Errorf("wedge (%d,%d) projects to %.16g, expected %.16g", i, j, projected, desired)
 			}
 		}
 	}
@@ -616,10 +652,5 @@ func (s *State) validateWedgeProjection() error {
 }
 
 func (s *State) Dimension() int {
-	dimension := len(s.Rho) + len(s.Edge)
-	if s.Layer >= LayerBase {
-		dimension += len(s.Candidate) + len(s.Score)
-	}
-	return dimension +
-		len(s.Wedge) + len(s.Histogram) + len(s.Xi) + len(s.Components) + len(s.Bridges)
+	return s.plan.dimension(s)
 }

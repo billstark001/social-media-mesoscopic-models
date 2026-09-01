@@ -142,16 +142,45 @@ func testRequest() config.RunRequest {
 func TestSixLayersInitializeAndIncreaseDimension(t *testing.T) {
 	request := testRequest()
 	previous := 0
+	expectedBlocks := [...]coordinateBlocks{
+		0,
+		blockBase,
+		blockBase | blockWedge,
+		blockBase | blockWedge | blockHistogram,
+		blockBase | blockWedge | blockHistogram | blockCandidate,
+		blockBase | blockWedge | blockHistogram | blockCandidate | blockTopology,
+	}
 	for layer := LayerNaive; layer <= LayerTopology; layer++ {
 		rng := rand.New(rand.NewPCG(10+uint64(layer), 20+uint64(layer)))
 		state, err := InitialState(request, layer, ClosureProfile{}, rng)
 		if err != nil {
 			t.Fatalf("layer %s: %v", layer.String(), err)
 		}
+		if state.plan != &layerPlans[layer] || state.plan.layer != layer {
+			t.Fatalf("layer %s did not bind its immutable plan", layer.String())
+		}
+		if state.plan.blocks != expectedBlocks[layer] {
+			t.Fatalf("layer %s blocks=%b, want %b", layer.String(), state.plan.blocks, expectedBlocks[layer])
+		}
+		if state.Clone().plan != state.plan {
+			t.Fatalf("layer %s clone changed plan", layer.String())
+		}
 		if state.Dimension() <= previous {
 			t.Fatalf("dimension did not increase: %d <= %d", state.Dimension(), previous)
 		}
 		previous = state.Dimension()
+	}
+}
+
+func TestInitialStateRejectsUnknownLayerPlan(t *testing.T) {
+	_, err := InitialState(
+		testRequest(),
+		Layer(99),
+		ClosureProfile{},
+		rand.New(rand.NewPCG(101, 102)),
+	)
+	if err == nil {
+		t.Fatal("unknown layer plan was accepted")
 	}
 }
 

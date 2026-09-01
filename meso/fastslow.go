@@ -37,7 +37,7 @@ func fastRewiringInputs(
 	}
 	applyComponentAmbiguity(state, request, recommendations, profile.ComponentMix)
 	neighbors = state.neighborKernel()
-	eligibility = rewiringEligibility(state, request, profile, neighbors, recommendations)
+	eligibility = state.plan.rewiringEligibility(state, request, profile, neighbors, recommendations)
 	for source, mass := range state.Rho {
 		residual += float64(state.Population) * request.Dynamics.RewiringRate * mass * eligibility[source]
 	}
@@ -81,13 +81,8 @@ func FastSlowStep(
 			return StepDiagnostics{}, err
 		}
 		updateRewiredCoordinates(state, target, request, profile, centerChange, globalChange)
-		if state.Layer < LayerCandidate {
-			copy(state.Candidate, target.Candidate)
-		}
+		state.plan.afterFastRewire(state, target)
 		state.Edge = edgeRewired
-		if state.Layer == LayerNaive {
-			copy(state.Score, target.Score)
-		}
 		if err := state.Validate(); err != nil {
 			return StepDiagnostics{}, err
 		}

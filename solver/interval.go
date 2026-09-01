@@ -13,45 +13,51 @@ type intervalCoordinate struct {
 	set    func(*meso.ClosureProfile, float64)
 }
 
+type intervalCoordinateSpec struct {
+	resolvedAt config.Layer
+	radius     func(config.AmbiguityConfig) float64
+	set        func(*meso.ClosureProfile, float64)
+}
+
+var intervalCoordinateSpecs = [...]intervalCoordinateSpec{
+	{
+		resolvedAt: config.LayerWedge,
+		radius:     func(value config.AmbiguityConfig) float64 { return value.MotifPersistenceRadius },
+		set:        func(profile *meso.ClosureProfile, value float64) { profile.MotifPersistence = value },
+	},
+	{
+		resolvedAt: config.LayerHistogram,
+		radius:     func(value config.AmbiguityConfig) float64 { return value.EligibilityCorrelationRadius },
+		set:        func(profile *meso.ClosureProfile, value float64) { profile.EligibilityCorrelation = value },
+	},
+	{
+		resolvedAt: config.LayerCandidate,
+		radius:     func(value config.AmbiguityConfig) float64 { return value.ScoreAvailabilityRadius },
+		set:        func(profile *meso.ClosureProfile, value float64) { profile.ScoreAvailability = value },
+	},
+	{
+		resolvedAt: config.LayerTopology,
+		radius:     func(value config.AmbiguityConfig) float64 { return value.BridgeBiasRadius },
+		set:        func(profile *meso.ClosureProfile, value float64) { profile.BridgeBias = value },
+	},
+	{
+		resolvedAt: config.LayerTopology,
+		radius:     func(value config.AmbiguityConfig) float64 { return value.ComponentMixRadius },
+		set:        func(profile *meso.ClosureProfile, value float64) { profile.ComponentMix = value },
+	},
+}
+
 func activeCoordinates(request config.RunRequest, layer config.Layer) []intervalCoordinate {
 	coordinates := make([]intervalCoordinate, 0, 5)
-	if layer < config.LayerWedge {
-		coordinates = append(coordinates, intervalCoordinate{
-			radius: request.Ambiguity.MotifPersistenceRadius,
-			set:    func(profile *meso.ClosureProfile, value float64) { profile.MotifPersistence = value },
-		})
-	}
-	if layer < config.LayerHistogram {
-		coordinates = append(coordinates, intervalCoordinate{
-			radius: request.Ambiguity.EligibilityCorrelationRadius,
-			set:    func(profile *meso.ClosureProfile, value float64) { profile.EligibilityCorrelation = value },
-		})
-	}
-	if layer < config.LayerCandidate {
-		coordinates = append(coordinates, intervalCoordinate{
-			radius: request.Ambiguity.ScoreAvailabilityRadius,
-			set:    func(profile *meso.ClosureProfile, value float64) { profile.ScoreAvailability = value },
-		})
-	}
-	if layer < config.LayerTopology {
-		coordinates = append(coordinates,
-			intervalCoordinate{
-				radius: request.Ambiguity.BridgeBiasRadius,
-				set:    func(profile *meso.ClosureProfile, value float64) { profile.BridgeBias = value },
-			},
-			intervalCoordinate{
-				radius: request.Ambiguity.ComponentMixRadius,
-				set:    func(profile *meso.ClosureProfile, value float64) { profile.ComponentMix = value },
-			},
-		)
-	}
-	result := coordinates[:0]
-	for _, coordinate := range coordinates {
-		if coordinate.radius > 0 {
-			result = append(result, coordinate)
+	for _, spec := range intervalCoordinateSpecs {
+		if layer < spec.resolvedAt {
+			coordinate := intervalCoordinate{radius: spec.radius(request.Ambiguity), set: spec.set}
+			if coordinate.radius > 0 {
+				coordinates = append(coordinates, coordinate)
+			}
 		}
 	}
-	return result
+	return coordinates
 }
 
 func ambiguityProfiles(request config.RunRequest, layer config.Layer) []meso.ClosureProfile {
