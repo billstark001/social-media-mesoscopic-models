@@ -1,6 +1,9 @@
 package kinetic
 
-import "math"
+import (
+	"math"
+	"smp-meso/numerics"
+)
 
 type exposureChannel struct {
 	Kernel             []float64
@@ -27,7 +30,7 @@ func conditionalNeighbors(current *state) []float64 {
 				row[target] = current.Edge[source*size+target] / denominator
 			}
 		}
-		normalizeRow(row, current.Rho)
+		numerics.NormalizeInPlace(row, current.Rho)
 	}
 	return result
 }
@@ -47,7 +50,7 @@ func channelMoments(current *state, kernel []float64) exposureChannel {
 			first += current.grid.Displacement[pair] * weight
 			second += current.grid.DisplacementSecond[pair] * weight
 		}
-		result.ConcordantMass[source] = clamp(mass, 0, 1)
+		result.ConcordantMass[source] = numerics.Clamp(mass, 0, 1)
 		if mass > 1e-15 {
 			result.MeanDisplacement[source] = first / mass
 			result.SecondDisplacement[source] = second / mass
@@ -66,7 +69,7 @@ func computeFields(current *state, recommend recommenderPlan, structuralScore []
 	degree := current.request.OutDegree
 	recommendationCount := current.request.RecommendationCount
 	for source := 0; source < size; source++ {
-		discordantProbability := clamp(1-neighborChannel.ConcordantMass[source], 0, 1)
+		discordantProbability := numerics.Clamp(1-neighborChannel.ConcordantMass[source], 0, 1)
 		concordantRecommendation := recommendationChannel.ConcordantMass[source]
 		eligibility := (1 - math.Pow(1-discordantProbability, float64(degree))) *
 			(1 - math.Pow(1-concordantRecommendation, float64(recommendationCount)))
