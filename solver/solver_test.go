@@ -4,6 +4,7 @@ import (
 	"math"
 	"reflect"
 	"smp-meso/config"
+	"smp-meso/protocol"
 	"testing"
 )
 
@@ -102,8 +103,8 @@ func TestProgressDoesNotChangeNumericalResult(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := make([]ProgressEvent, 0)
-	observed, err := RunWithProgress(request, 1, func(event ProgressEvent) {
+	events := make([]protocol.ProgressEvent, 0)
+	observed, err := RunWithProgress(request, 1, func(event protocol.ProgressEvent) {
 		events = append(events, event)
 	})
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"math/rand/v2"
 	"smp-meso/config"
 	"smp-meso/meso"
+	"smp-meso/protocol"
 	"sync"
 	"sync/atomic"
 )
@@ -108,7 +109,7 @@ func runEnsembleWithProgress(
 	paths int,
 	seedNamespace uint64,
 	progressStepInterval int,
-	progress ProgressFunc,
+	progress protocol.ProgressFunc,
 ) (Ensemble, error) {
 	workers := min(request.Workers, paths)
 	type job struct {
@@ -121,7 +122,7 @@ func runEnsembleWithProgress(
 	var group sync.WaitGroup
 	var completed atomic.Int64
 	var progressMutex sync.Mutex
-	emit := func(event ProgressEvent) {
+	emit := func(event protocol.ProgressEvent) {
 		if progress == nil {
 			return
 		}
@@ -137,7 +138,7 @@ func runEnsembleWithProgress(
 				outcome, err := runPath(
 					request, layer, profile, item.seed, progressStepInterval,
 					func(step int) {
-						emit(ProgressEvent{
+						emit(protocol.ProgressEvent{
 							Event: "path_heartbeat", PathIndex: item.index + 1,
 							TotalPaths: paths, Step: step,
 						})
@@ -156,7 +157,7 @@ func runEnsembleWithProgress(
 				if outcome.Category >= 0 && outcome.Category < len(Categories) {
 					category = Categories[outcome.Category]
 				}
-				emit(ProgressEvent{
+				emit(protocol.ProgressEvent{
 					Event: "path_completed", PathIndex: item.index + 1,
 					CompletedPaths: done, TotalPaths: paths, Step: outcome.Steps,
 					Category: category, StateDimension: outcome.StateDimension,

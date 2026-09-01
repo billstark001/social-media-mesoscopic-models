@@ -3,51 +3,34 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
-	"smp-meso/config"
-	"smp-meso/solver"
+	"reflect"
 	"testing"
 )
 
-func protocolRequest(id string) config.RunRequest {
-	return config.RunRequest{
-		RequestID: id, Layer: "base", Population: 30, OpinionBins: 4,
-		OutDegree: 3, RecommendationCount: 2, MaxSteps: 2,
-		Paths: 1, IntervalPaths: 1, AmbiguitySamples: 1,
-		ConfidenceLevel: 0.95, Workers: 1, Seed: 9, MajorClusterMass: 0.05,
-		Dynamics: config.DynamicsConfig{
-			Type: "hk", Tolerance: 0.45, Influence: 0.05, RewiringRate: 0.02,
-		},
-		Recommender: config.RecommenderConfig{
-			Type: "random", Steepness: 0, RandomRatio: 0,
-			OpinionTolerance: 0.4, NoiseStd: 0, NoiseQuadraturePoints: 1,
-		},
-		Initial: config.InitialConfig{
-			Type: "uniform", OpinionMin: -1, OpinionMax: 1, Probabilities: []float64{},
-		},
-		Resolution: config.ResolutionConfig{
-			ScoreMax: 5, AvailabilityBins: 3, ComponentSizeBins: 3, OpinionQuadrature: 1,
-		},
-		Closure: config.ClosureConfig{
-			MotifRelaxation: 0.2, HistogramRelaxation: 0.2,
-			CandidateRelaxation: 0.2, TopologyRelaxation: 0.2,
-		},
-		FastSlow: config.FastSlowConfig{Mode: "unsplit", RatioThreshold: 10, MaxSubsteps: 50,
-			ZeroEventBatches: 3, ResidualTolerance: 1e-12, ZeroEventResidual: 0.25},
-		Ambiguity: config.AmbiguityConfig{},
+func stubExecute(data []byte, _ int, progress ProgressFunc) Response {
+	var request struct {
+		RequestID string `json:"request_id"`
+		Fail      bool   `json:"fail"`
 	}
+	if err := json.Unmarshal(data, &request); err != nil {
+		return Response{Error: err.Error()}
+	}
+	if request.Fail {
+		if progress != nil {
+			progress(ProgressEvent{Event: "request_rejected", RequestID: request.RequestID})
+		}
+		return Response{RequestID: request.RequestID, Error: "rejected"}
+	}
+	if progress != nil {
+		progress(ProgressEvent{Event: "request_completed", RequestID: request.RequestID})
+	}
+	return Response{RequestID: request.RequestID, Result: map[string]any{"ok": true}}
 }
 
 func TestJSONLContinuesAfterInvalidRequest(t *testing.T) {
-	valid, err := json.Marshal(protocolRequest("good"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := bytes.NewBuffer(nil)
-	input.WriteString(`{"request_id":"bad"}` + "\n")
-	input.Write(valid)
-	input.WriteByte('\n')
+	input := bytes.NewBufferString("{\"request_id\":\"bad\",\"fail\":true}\n{\"request_id\":\"good\"}\n")
 	output := bytes.NewBuffer(nil)
-	if err := RunJSONL(input, output); err != nil {
+	if err := RunJSONL(input, output, stubExecute); err != nil {
 		t.Fatal(err)
 	}
 	decoder := json.NewDecoder(output)
@@ -67,30 +50,33 @@ func TestJSONLContinuesAfterInvalidRequest(t *testing.T) {
 }
 
 func TestJSONLProgressCarriesBatchLine(t *testing.T) {
-	valid, err := json.Marshal(protocolRequest("good"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	input := bytes.NewBuffer(nil)
-	input.WriteString(`{"request_id":"bad"}` + "\n")
-	input.Write(valid)
-	input.WriteByte('\n')
-	events := make([]solver.ProgressEvent, 0)
-	if err := RunJSONLWithProgress(input, bytes.NewBuffer(nil), 1, func(event solver.ProgressEvent) {
+	input := bytes.NewBufferString("{\"request_id\":\"bad\",\"fail\":true}\n{\"request_id\":\"good\"}\n")
+	events := make([]ProgressEvent, 0)
+	if err := RunJSONLWithProgress(input, bytes.NewBuffer(nil), stubExecute, 1, func(event ProgressEvent) {
 		events = append(events, event)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	rejected, completed := false, false
-	for _, event := range events {
-		if event.Event == "request_rejected" {
-			rejected = event.BatchIndex == 1 && event.RequestID == "bad"
-		}
-		if event.Event == "request_completed" {
-			completed = event.BatchIndex == 2 && event.RequestID == "good"
-		}
-	}
-	if !rejected || !completed {
+	if len(events) != 2 || events[0].BatchIndex != 1 || events[1].BatchIndex != 2 {
 		t.Fatalf("missing line-aware events: %+v", events)
+	}
+}
+
+func TestFloat64ArrayRoundTrip(t *testing.T) {
+	values := []float64{0, -1.25, 3.5, 1e100}
+	encoded, err := EncodeFloat64(values, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, shape, err := encoded.DecodeFloat64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, values) || !reflect.DeepEqual(shape, []int{2, 2}) {
+		t.Fatalf("decoded=%v shape=%v", decoded, shape)
+	}
+	encoded.Data += "not-base64"
+	if _, _, err := encoded.DecodeFloat64(); err == nil {
+		t.Fatal("corrupt array was accepted")
 	}
 }

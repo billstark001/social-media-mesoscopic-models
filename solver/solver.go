@@ -4,6 +4,7 @@ import (
 	"smp-meso/config"
 	"smp-meso/meso"
 	"smp-meso/numerics"
+	"smp-meso/protocol"
 	"time"
 )
 
@@ -48,7 +49,7 @@ func Run(request config.RunRequest) (Result, error) {
 func RunWithProgress(
 	request config.RunRequest,
 	progressStepInterval int,
-	progress ProgressFunc,
+	progress protocol.ProgressFunc,
 ) (Result, error) {
 	started := time.Now()
 	if err := request.Validate(); err != nil {
@@ -58,17 +59,18 @@ func RunWithProgress(
 	if err != nil {
 		return Result{}, err
 	}
-	emit := func(event ProgressEvent) {
+	emit := func(event protocol.ProgressEvent) {
 		if progress == nil {
 			return
 		}
 		event.RequestID = request.RequestID
+		event.Solver = "lifted"
 		event.Layer = layer.String()
 		event.ElapsedSeconds = time.Since(started).Seconds()
 		progress(event)
 	}
-	emit(ProgressEvent{Event: "request_started"})
-	pointProgress := func(event ProgressEvent) {
+	emit(protocol.ProgressEvent{Event: "request_started"})
+	pointProgress := func(event protocol.ProgressEvent) {
 		event.Stage = "point"
 		emit(event)
 	}
@@ -107,7 +109,7 @@ func RunWithProgress(
 			Decomposition:  request.FastSlow.Mode,
 		},
 	}
-	emit(ProgressEvent{
+	emit(protocol.ProgressEvent{
 		Event: "request_completed", StateDimension: point.StateDimension,
 		CompletedPaths: request.Paths + interval.ScenarioCount*request.IntervalPaths,
 		TotalPaths:     request.Paths + interval.ScenarioCount*request.IntervalPaths,

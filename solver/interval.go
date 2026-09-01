@@ -6,6 +6,7 @@ import (
 	"smp-meso/config"
 	"smp-meso/meso"
 	"smp-meso/numerics"
+	"smp-meso/protocol"
 )
 
 type intervalCoordinate struct {
@@ -123,7 +124,7 @@ func runInterval(
 	layer config.Layer,
 	point Ensemble,
 	progressStepInterval int,
-	progress ProgressFunc,
+	progress protocol.ProgressFunc,
 ) (IntervalEstimate, error) {
 	profiles := ambiguityProfiles(request, layer)
 	estimate := IntervalEstimate{
@@ -143,13 +144,13 @@ func runInterval(
 	}
 	for scenario, profile := range profiles {
 		if progress != nil {
-			progress(ProgressEvent{
+			progress(protocol.ProgressEvent{
 				Event: "scenario_started", Stage: "interval",
 				ScenarioIndex: scenario + 1, ScenarioCount: len(profiles),
 				TotalPaths: request.IntervalPaths,
 			})
 		}
-		scenarioProgress := func(event ProgressEvent) {
+		scenarioProgress := func(event protocol.ProgressEvent) {
 			event.Stage = "interval"
 			event.ScenarioIndex = scenario + 1
 			event.ScenarioCount = len(profiles)
@@ -176,7 +177,7 @@ func runInterval(
 			estimate.Upper[category] = math.Max(estimate.Upper[category], upper)
 		}
 		if progress != nil {
-			progress(ProgressEvent{
+			progress(protocol.ProgressEvent{
 				Event: "scenario_completed", Stage: "interval",
 				ScenarioIndex: scenario + 1, ScenarioCount: len(profiles),
 				CompletedPaths: ensemble.Paths, TotalPaths: ensemble.Paths,
