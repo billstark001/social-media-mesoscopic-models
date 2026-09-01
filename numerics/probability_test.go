@@ -56,6 +56,23 @@ func TestLargeBinomialAvoidsTailUnderflow(t *testing.T) {
 	}
 }
 
+func TestLargePoissonAvoidsZeroAnchorUnderflow(t *testing.T) {
+	pmf := PoissonPMF(800, 1000)
+	mean := 0.0
+	for score, probability := range pmf {
+		mean += float64(score) * probability
+	}
+	if math.Abs(Sum(pmf)-1) > 1e-13 {
+		t.Fatalf("pmf sum=%g", Sum(pmf))
+	}
+	if math.Abs(mean-800) > 1e-9 {
+		t.Fatalf("large Poisson mean=%g", mean)
+	}
+	if pmf[800] <= 0.01 || pmf[len(pmf)-1] >= 1e-8 {
+		t.Fatalf("large Poisson collapsed: mode=%g capped-tail=%g", pmf[800], pmf[len(pmf)-1])
+	}
+}
+
 func TestNormalizeInPlaceRejectsNonFiniteMass(t *testing.T) {
 	values := []float64{1, math.Inf(1), math.NaN()}
 	NormalizeInPlace(values, []float64{0, 1, 0})

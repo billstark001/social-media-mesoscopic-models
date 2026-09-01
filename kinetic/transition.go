@@ -18,7 +18,7 @@ func planMeasureTransition(request RunRequest) transitionBuilder {
 		panic("validated dynamics was not dispatched")
 	}
 	return func(current *state, values fields) (*numerics.SparseTransition, error) {
-		return numerics.DenseToSparse(reference(current, values), current.request.OpinionBins), nil
+		return numerics.DenseToSparse(reference(current, values), current.request.OpinionBins)
 	}
 }
 
@@ -46,35 +46,15 @@ func quadratureNodes(count int) []float64 {
 	return result
 }
 
-func depositPoint(row []float64, axis []float64, value, mass float64) {
-	if mass <= 0 {
-		return
-	}
-	last := len(axis) - 1
-	if value <= axis[0] {
-		row[0] += mass
-		return
-	}
-	if value >= axis[last] {
-		row[last] += mass
-		return
-	}
-	coordinate := (value - axis[0]) / (axis[1] - axis[0])
-	lower := int(math.Floor(coordinate))
-	fraction := clamp(coordinate-float64(lower), 0, 1)
-	row[lower] += mass * (1 - fraction)
-	row[lower+1] += mass * fraction
-}
-
 func depositNormal(row []float64, axis, nodes []float64, mean, variance, mass float64) {
 	if variance <= 1e-18 || len(nodes) == 1 {
-		depositPoint(row, axis, mean, mass)
+		numerics.DepositUniformLinear(row, axis, mean, mass)
 		return
 	}
 	standardDeviation := math.Sqrt(variance)
 	weight := mass / float64(len(nodes))
 	for _, node := range nodes {
-		depositPoint(row, axis, mean+standardDeviation*node, weight)
+		numerics.DepositUniformLinear(row, axis, mean+standardDeviation*node, weight)
 	}
 }
 
@@ -100,7 +80,7 @@ func hkReferenceTransition(current *state, values fields) []float64 {
 				probability := neighborProbability * recommendationProbability
 				totalCount := neighborCount + recommendationCount
 				if totalCount == 0 {
-					depositPoint(row, current.grid.Axis, opinion, probability)
+					numerics.DepositUniformLinear(row, current.grid.Axis, opinion, probability)
 					continue
 				}
 				count := float64(totalCount)
@@ -109,7 +89,7 @@ func hkReferenceTransition(current *state, values fields) []float64 {
 				depositNormal(row, current.grid.Axis, nodes, opinion+alpha*meanDisplacement, alpha*alpha*variance, probability)
 			}
 		}
-		normalizeRow(row, nil)
+		numerics.NormalizeInPlace(row, nil)
 	}
 	return result
 }
@@ -157,10 +137,10 @@ func deffuantReferenceTransition(current *state, values fields) []float64 {
 			}
 		}
 		row := result[source*size : (source+1)*size]
-		depositPoint(row, current.grid.Axis, current.grid.Axis[source], stay)
+		numerics.DepositUniformLinear(row, current.grid.Axis, current.grid.Axis[source], stay)
 		addDeffuantChannel(row, current, values.Neighbors, source, neighborCoefficient, nodes)
 		addDeffuantChannel(row, current, values.Recommendations, source, recommendationCoefficient, nodes)
-		normalizeRow(row, nil)
+		numerics.NormalizeInPlace(row, nil)
 	}
 	return result
 }

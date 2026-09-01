@@ -78,3 +78,12 @@ func TestAllLayerNames(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRejectsOversizedStateBeforeAllocation(t *testing.T) {
+	request := validRequest()
+	request.Layer = "topology"
+	request.OpinionBins = 1 << 30
+	if err := request.Validate(); err == nil || !strings.Contains(err.Error(), "overflow") {
+		t.Fatalf("oversized request was not rejected safely: %v", err)
+	}
+}

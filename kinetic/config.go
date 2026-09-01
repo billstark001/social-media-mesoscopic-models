@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"smp-meso/numerics"
 	"smp-meso/protocol"
 	"strings"
 )
@@ -153,23 +154,6 @@ func DecodeRequest(data []byte) (RunRequest, error) {
 	return request, nil
 }
 
-func finite(name string, value float64) error {
-	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return fmt.Errorf("%s must be finite", name)
-	}
-	return nil
-}
-
-func unit(name string, value float64) error {
-	if err := finite(name, value); err != nil {
-		return err
-	}
-	if value < 0 || value > 1 {
-		return fmt.Errorf("%s must be in [0,1], got %g", name, value)
-	}
-	return nil
-}
-
 func oneOf(value string, choices ...string) bool {
 	value = strings.ToLower(strings.TrimSpace(value))
 	for _, choice := range choices {
@@ -205,7 +189,7 @@ func (request RunRequest) Validate() error {
 		"opinion_tolerance": request.Recommender.OpinionTolerance,
 		"minimum_bandwidth": request.Observables.MinimumBandwidth,
 	} {
-		if err := finite(name, value); err != nil {
+		if err := numerics.CheckFinite(name, value); err != nil {
 			return err
 		}
 	}
@@ -218,10 +202,10 @@ func (request RunRequest) Validate() error {
 	if request.Dynamics.Tolerance <= 0 || request.Dynamics.Tolerance > request.Initial.OpinionMax-request.Initial.OpinionMin {
 		return errors.New("tolerance must lie in the opinion-domain width")
 	}
-	if err := unit("influence", request.Dynamics.Influence); err != nil {
+	if err := numerics.CheckUnit("influence", request.Dynamics.Influence); err != nil {
 		return err
 	}
-	if err := unit("rewiring_rate", request.Dynamics.RewiringRate); err != nil {
+	if err := numerics.CheckUnit("rewiring_rate", request.Dynamics.RewiringRate); err != nil {
 		return err
 	}
 	if request.Dt*request.Dynamics.Influence > 1+1e-12 || request.Dt*request.Dynamics.RewiringRate > 1+1e-12 {
@@ -242,7 +226,7 @@ func (request RunRequest) Validate() error {
 	if request.Recommender.Steepness <= 0 || request.Recommender.OpinionTolerance <= 0 {
 		return errors.New("steepness and opinion_tolerance must be positive")
 	}
-	if err := unit("random_ratio", request.Recommender.RandomRatio); err != nil {
+	if err := numerics.CheckUnit("random_ratio", request.Recommender.RandomRatio); err != nil {
 		return err
 	}
 	if request.Resolution.OpinionQuadraturePoints < 1 || request.Resolution.ConfidenceQuadraturePoints < 1 || request.Resolution.ScoreMax < 1 || request.Resolution.DistanceGridSize < 3 {
@@ -251,13 +235,17 @@ func (request RunRequest) Validate() error {
 	if request.Observables.MinimumBandwidth <= 0 || request.Observables.ObjectiveEffectiveSamples < 1 {
 		return errors.New("minimum_bandwidth and objective_effective_samples must be positive")
 	}
-	if err := unit("polarization_threshold", request.Observables.PolarizationThreshold); err != nil {
+	if err := numerics.CheckUnit("polarization_threshold", request.Observables.PolarizationThreshold); err != nil {
 		return err
 	}
-	if err := unit("homophily_threshold", request.Observables.HomophilyThreshold); err != nil {
+	if err := numerics.CheckUnit("homophily_threshold", request.Observables.HomophilyThreshold); err != nil {
 		return err
 	}
-	if _, err := request.snapshotSteps(); err != nil {
+	snapshotSteps, err := request.snapshotSteps()
+	if err != nil {
+		return err
+	}
+	if err := request.validateWorkingSet(len(snapshotSteps)); err != nil {
 		return err
 	}
 	values, shape, err := request.Initial.Probabilities.DecodeFloat64()
@@ -275,7 +263,7 @@ func (request RunRequest) Validate() error {
 		}
 		total := 0.0
 		for _, value := range values {
-			if err := finite("initial probability", value); err != nil || value < 0 {
+			if err := numerics.CheckFinite("initial probability", value); err != nil || value < 0 {
 				return errors.New("initial probabilities must be finite and nonnegative")
 			}
 			total += value
@@ -287,6 +275,65 @@ func (request RunRequest) Validate() error {
 		return fmt.Errorf("unsupported initial type %q", request.Initial.Type)
 	}
 	return nil
+}
+
+func (request RunRequest) validateWorkingSet(snapshotCount int) error {
+	size := request.OpinionBins
+	square, err := numerics.CheckedProduct("kinetic opinion matrix", size, size)
+	if err != nil {
+		return err
+	}
+	base, err := numerics.CheckedProduct("kinetic base workspace", 20, square)
+	if err != nil {
+		return err
+	}
+	linear, err := numerics.CheckedProduct("kinetic vector workspace", 10, size)
+	if err != nil {
+		return err
+	}
+	total, err := numerics.CheckedSum("kinetic working set", base, linear)
+	if err != nil {
+		return err
+	}
+	if normalize(request.Recommender.Type) == "structure_random_l1" {
+		cube, err := numerics.CheckedProduct("kinetic wedge tensor", size, size, size)
+		if err != nil {
+			return err
+		}
+		wedge, err := numerics.CheckedProduct("kinetic wedge workspace", 12, cube)
+		if err != nil {
+			return err
+		}
+		total, err = numerics.CheckedSum("kinetic working set", total, wedge)
+		if err != nil {
+			return err
+		}
+	}
+	perSnapshot := 0
+	if request.Snapshots.Rho {
+		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, size)
+	}
+	if err == nil && request.Snapshots.Edge {
+		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, square)
+	}
+	if err == nil && request.Snapshots.Velocity {
+		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, size)
+	}
+	if err == nil && request.Snapshots.RewiringFlux {
+		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, square)
+	}
+	if err != nil {
+		return err
+	}
+	snapshots, err := numerics.CheckedProduct("kinetic snapshot output", snapshotCount, perSnapshot)
+	if err != nil {
+		return err
+	}
+	total, err = numerics.CheckedSum("kinetic working set", total, snapshots)
+	if err != nil {
+		return err
+	}
+	return numerics.CheckFloat64Budget("kinetic request", total)
 }
 
 func (request RunRequest) snapshotSteps() ([]int, error) {
@@ -311,7 +358,7 @@ func (request RunRequest) snapshotSteps() ([]int, error) {
 	steps := make([]int, len(values))
 	previous := -1
 	for index, value := range values {
-		if err := finite("snapshot step", value); err != nil || math.Trunc(value) != value {
+		if err := numerics.CheckFinite("snapshot step", value); err != nil || math.Trunc(value) != value {
 			return nil, errors.New("snapshot steps must be finite integers")
 		}
 		step := int(value)

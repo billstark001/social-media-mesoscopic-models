@@ -22,15 +22,24 @@ func newStepWorkspace(size int) *stepWorkspace {
 
 type opinionEvolution func(*state, fields, []float64, *stepWorkspace) error
 
-func applyPDE(current *state, edgeSource []float64, workspace *stepWorkspace, system *numerics.TridiagonalSystem) {
-	numerics.ActiveBackend.ApplyTridiagonal(workspace.rhoNext, current.Rho, system)
-	numerics.ActiveBackend.TransportTridiagonalMatrix(workspace.edgeNext, workspace.edgeScratch, edgeSource, system)
-	current.plan.transportPDE(current, system)
+func applyPDE(current *state, edgeSource []float64, workspace *stepWorkspace, system *numerics.TridiagonalSystem) error {
+	if err := numerics.ActiveBackend.ApplyTridiagonal(workspace.rhoNext, current.Rho, system); err != nil {
+		return err
+	}
+	if err := numerics.ActiveBackend.TransportTridiagonalMatrix(
+		workspace.edgeNext, workspace.edgeScratch, edgeSource, system,
+	); err != nil {
+		return err
+	}
+	if err := current.plan.transportPDE(current, system); err != nil {
+		return err
+	}
 	current.Rho, workspace.rhoNext = workspace.rhoNext, current.Rho
 	current.Edge, workspace.edgeNext = workspace.edgeNext, current.Edge
+	return nil
 }
 
-func constantDiffusionSystem(request RunRequest, grid *gridGeometry) *numerics.TridiagonalSystem {
+func constantDiffusionSystem(request RunRequest, grid *gridGeometry) (*numerics.TridiagonalSystem, error) {
 	diffusion := make([]float64, request.OpinionBins)
 	for index := range diffusion {
 		diffusion[index] = request.NoiseDiffusion
@@ -42,11 +51,15 @@ func planOpinionEvolution(request RunRequest, grid *gridGeometry) opinionEvoluti
 	if normalize(request.Dynamics.OpinionMethod) == "measure" {
 		buildTransition := planMeasureTransition(request)
 		var background *numerics.TridiagonalSystem
-		applyBackground := func(*state, *stepWorkspace) {}
+		var backgroundErr error
+		applyBackground := func(*state, *stepWorkspace) error { return nil }
 		if request.NoiseDiffusion > 0 {
-			background = constantDiffusionSystem(request, grid)
-			applyBackground = func(current *state, workspace *stepWorkspace) {
-				applyPDE(current, current.Edge, workspace, background)
+			background, backgroundErr = constantDiffusionSystem(request, grid)
+			applyBackground = func(current *state, workspace *stepWorkspace) error {
+				if backgroundErr != nil {
+					return backgroundErr
+				}
+				return applyPDE(current, current.Edge, workspace, background)
 			}
 		}
 		return func(current *state, values fields, edgeRewired []float64, workspace *stepWorkspace) error {
@@ -59,8 +72,7 @@ func planOpinionEvolution(request RunRequest, grid *gridGeometry) opinionEvoluti
 			current.plan.transportMeasure(current, transition)
 			current.Rho, workspace.rhoNext = workspace.rhoNext, current.Rho
 			current.Edge, workspace.edgeNext = workspace.edgeNext, current.Edge
-			applyBackground(current, workspace)
-			return nil
+			return applyBackground(current, workspace)
 		}
 	}
 	buildMoments := planMomentBuilder(request)
@@ -76,8 +88,11 @@ func planOpinionEvolution(request RunRequest, grid *gridGeometry) opinionEvoluti
 				return fmt.Errorf("invalid Fokker-Planck coefficient at cell %d", index)
 			}
 		}
-		applyPDE(current, edgeRewired, workspace, fokkerPlanckSystem(velocity, diffusion, grid.Dx, request.Dt))
-		return nil
+		system, err := fokkerPlanckSystem(velocity, diffusion, grid.Dx, request.Dt)
+		if err != nil {
+			return err
+		}
+		return applyPDE(current, edgeRewired, workspace, system)
 	}
 }
 
@@ -88,7 +103,7 @@ func isFiniteNonnegative(value float64) bool {
 // fokkerPlanckSystem is the backward-Euler no-flux finite-volume system for
 // d_t rho = -d_x(v rho) + d_xx(D rho). Upwind drift and cell-sided diffusion
 // make the generator conservative and Metzler.
-func fokkerPlanckSystem(velocity, diffusion []float64, dx, dt float64) *numerics.TridiagonalSystem {
+func fokkerPlanckSystem(velocity, diffusion []float64, dx, dt float64) (*numerics.TridiagonalSystem, error) {
 	size := len(velocity)
 	lower := make([]float64, size-1)
 	upper := make([]float64, size-1)

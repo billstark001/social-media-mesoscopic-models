@@ -201,35 +201,8 @@ func DecodeRequest(data []byte) (RunRequest, error) {
 	return request, nil
 }
 
-func finite(name string, value float64) error {
-	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return fmt.Errorf("%s must be finite", name)
-	}
-	return nil
-}
-
-func unit(name string, value float64) error {
-	if err := finite(name, value); err != nil {
-		return err
-	}
-	if value < 0 || value > 1 {
-		return fmt.Errorf("%s must be in [0,1], got %g", name, value)
-	}
-	return nil
-}
-
-func nonnegative(name string, value float64) error {
-	if err := finite(name, value); err != nil {
-		return err
-	}
-	if value < 0 {
-		return fmt.Errorf("%s must be nonnegative, got %g", name, value)
-	}
-	return nil
-}
-
 func radius(name string, value float64) error {
-	if err := unit(name, value); err != nil {
+	if err := numerics.CheckUnit(name, value); err != nil {
 		return err
 	}
 	return nil
@@ -239,7 +212,8 @@ func (r RunRequest) Validate() error {
 	if strings.TrimSpace(r.RequestID) == "" {
 		return errors.New("request_id must not be empty")
 	}
-	if _, err := ParseLayer(r.Layer); err != nil {
+	layer, err := ParseLayer(r.Layer)
+	if err != nil {
 		return err
 	}
 	if r.Population < 2 {
@@ -260,7 +234,7 @@ func (r RunRequest) Validate() error {
 	if r.ConfidenceLevel <= 0 || r.ConfidenceLevel >= 1 || math.IsNaN(r.ConfidenceLevel) {
 		return fmt.Errorf("confidence_level must be in (0,1), got %g", r.ConfidenceLevel)
 	}
-	if err := unit("major_cluster_mass", r.MajorClusterMass); err != nil {
+	if err := numerics.CheckUnit("major_cluster_mass", r.MajorClusterMass); err != nil {
 		return err
 	}
 	if r.MajorClusterMass <= 0 {
@@ -271,13 +245,13 @@ func (r RunRequest) Validate() error {
 	if dynamics != "hk" && dynamics != "deffuant" {
 		return fmt.Errorf("unsupported dynamics.type %q", r.Dynamics.Type)
 	}
-	if err := nonnegative("dynamics.tolerance", r.Dynamics.Tolerance); err != nil {
+	if err := numerics.CheckNonnegative("dynamics.tolerance", r.Dynamics.Tolerance); err != nil {
 		return err
 	}
-	if err := unit("dynamics.influence", r.Dynamics.Influence); err != nil {
+	if err := numerics.CheckUnit("dynamics.influence", r.Dynamics.Influence); err != nil {
 		return err
 	}
-	if err := unit("dynamics.rewiring_rate", r.Dynamics.RewiringRate); err != nil {
+	if err := numerics.CheckUnit("dynamics.rewiring_rate", r.Dynamics.RewiringRate); err != nil {
 		return err
 	}
 
@@ -285,19 +259,19 @@ func (r RunRequest) Validate() error {
 	if recommender != "random" && recommender != "opinion_random" && recommender != "structure_random" {
 		return fmt.Errorf("unsupported recommender.type %q", r.Recommender.Type)
 	}
-	if err := nonnegative("recommender.steepness", r.Recommender.Steepness); err != nil {
+	if err := numerics.CheckNonnegative("recommender.steepness", r.Recommender.Steepness); err != nil {
 		return err
 	}
 	if recommender != "random" && r.Recommender.Steepness <= 0 {
 		return errors.New("recommender.steepness must be >0 for weighted recommenders")
 	}
-	if err := unit("recommender.random_ratio", r.Recommender.RandomRatio); err != nil {
+	if err := numerics.CheckUnit("recommender.random_ratio", r.Recommender.RandomRatio); err != nil {
 		return err
 	}
-	if err := nonnegative("recommender.opinion_tolerance", r.Recommender.OpinionTolerance); err != nil {
+	if err := numerics.CheckNonnegative("recommender.opinion_tolerance", r.Recommender.OpinionTolerance); err != nil {
 		return err
 	}
-	if err := nonnegative("recommender.noise_std", r.Recommender.NoiseStd); err != nil {
+	if err := numerics.CheckNonnegative("recommender.noise_std", r.Recommender.NoiseStd); err != nil {
 		return err
 	}
 	if r.Recommender.NoiseQuadraturePoints < 1 {
@@ -308,10 +282,10 @@ func (r RunRequest) Validate() error {
 	if initialType != "uniform" && initialType != "categorical" {
 		return fmt.Errorf("unsupported initial.type %q", r.Initial.Type)
 	}
-	if err := finite("initial.opinion_min", r.Initial.OpinionMin); err != nil {
+	if err := numerics.CheckFinite("initial.opinion_min", r.Initial.OpinionMin); err != nil {
 		return err
 	}
-	if err := finite("initial.opinion_max", r.Initial.OpinionMax); err != nil {
+	if err := numerics.CheckFinite("initial.opinion_max", r.Initial.OpinionMax); err != nil {
 		return err
 	}
 	if r.Initial.OpinionMax <= r.Initial.OpinionMin {
@@ -339,7 +313,7 @@ func (r RunRequest) Validate() error {
 		"closure.candidate_relaxation": r.Closure.CandidateRelaxation,
 		"closure.topology_relaxation":  r.Closure.TopologyRelaxation,
 	} {
-		if err := unit(name, value); err != nil {
+		if err := numerics.CheckUnit(name, value); err != nil {
 			return err
 		}
 	}
@@ -347,7 +321,7 @@ func (r RunRequest) Validate() error {
 	if fastSlowMode != "unsplit" && fastSlowMode != "conditional_absorption" {
 		return fmt.Errorf("unsupported fast_slow.mode %q", r.FastSlow.Mode)
 	}
-	if err := nonnegative("fast_slow.ratio_threshold", r.FastSlow.RatioThreshold); err != nil {
+	if err := numerics.CheckNonnegative("fast_slow.ratio_threshold", r.FastSlow.RatioThreshold); err != nil {
 		return err
 	}
 	if r.FastSlow.MaxSubsteps < 1 {
@@ -356,10 +330,10 @@ func (r RunRequest) Validate() error {
 	if r.FastSlow.ZeroEventBatches < 1 {
 		return errors.New("fast_slow.zero_event_batches must be positive")
 	}
-	if err := nonnegative("fast_slow.residual_tolerance", r.FastSlow.ResidualTolerance); err != nil {
+	if err := numerics.CheckNonnegative("fast_slow.residual_tolerance", r.FastSlow.ResidualTolerance); err != nil {
 		return err
 	}
-	if err := nonnegative("fast_slow.zero_event_residual", r.FastSlow.ZeroEventResidual); err != nil {
+	if err := numerics.CheckNonnegative("fast_slow.zero_event_residual", r.FastSlow.ZeroEventResidual); err != nil {
 		return err
 	}
 	for name, value := range map[string]float64{
@@ -373,5 +347,86 @@ func (r RunRequest) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return r.validateWorkingSet(layer)
+}
+
+func (r RunRequest) validateWorkingSet(layer Layer) error {
+	size := r.OpinionBins
+	square, err := numerics.CheckedProduct("lifted opinion matrix", size, size)
+	if err != nil {
+		return err
+	}
+	linear, err := numerics.CheckedProduct("lifted vector state", 2, size)
+	if err != nil {
+		return err
+	}
+	matrices, err := numerics.CheckedProduct("lifted matrix state", 3, square)
+	if err != nil {
+		return err
+	}
+	coordinates, err := numerics.CheckedSum("lifted state", linear, matrices)
+	if err != nil {
+		return err
+	}
+	if layer >= LayerWedge {
+		cube, err := numerics.CheckedProduct("lifted wedge tensor", size, size, size)
+		if err != nil {
+			return err
+		}
+		coordinates, err = numerics.CheckedSum("lifted state", coordinates, cube)
+		if err != nil {
+			return err
+		}
+	}
+	if layer >= LayerHistogram {
+		degreeBins, err := numerics.CheckedSum("lifted degree bins", r.OutDegree, 1)
+		if err != nil {
+			return err
+		}
+		histogram, err := numerics.CheckedProduct("lifted histogram", size,
+			degreeBins, degreeBins, r.Resolution.AvailabilityBins)
+		if err != nil {
+			return err
+		}
+		coordinates, err = numerics.CheckedSum("lifted state", coordinates, histogram)
+		if err != nil {
+			return err
+		}
+	}
+	if layer >= LayerCandidate {
+		scoreBins, err := numerics.CheckedSum("lifted score bins", r.Resolution.ScoreMax, 1)
+		if err != nil {
+			return err
+		}
+		xi, err := numerics.CheckedProduct("lifted candidate tensor", size, size, 2, scoreBins)
+		if err != nil {
+			return err
+		}
+		coordinates, err = numerics.CheckedSum("lifted state", coordinates, xi)
+		if err != nil {
+			return err
+		}
+	}
+	if layer >= LayerTopology {
+		topology, err := numerics.CheckedProduct("lifted component state", size, r.Resolution.ComponentSizeBins)
+		if err != nil {
+			return err
+		}
+		coordinates, err = numerics.CheckedSum("lifted state", coordinates, topology, square)
+		if err != nil {
+			return err
+		}
+	}
+	// A retained path temporarily holds reconstructed targets and transported
+	// coordinate buffers. Six copies is a conservative peak estimate.
+	perPath, err := numerics.CheckedProduct("lifted per-path workspace", 6, coordinates)
+	if err != nil {
+		return err
+	}
+	workers := min(r.Workers, max(r.Paths, r.IntervalPaths))
+	total, err := numerics.CheckedProduct("lifted concurrent working set", workers, perPath)
+	if err != nil {
+		return err
+	}
+	return numerics.CheckFloat64Budget("lifted request", total)
 }

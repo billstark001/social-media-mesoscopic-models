@@ -2,6 +2,7 @@ package numerics
 
 import (
 	"errors"
+	"gonum.org/v1/gonum/mathext"
 	"math"
 	"math/rand/v2"
 )
@@ -168,20 +169,53 @@ func SampleMultinomial(n int, probabilities []float64, rng *rand.Rand, output []
 }
 
 func PoissonPMF(mean float64, maximum int) []float64 {
+	if maximum < 0 {
+		return nil
+	}
 	result := make([]float64, maximum+1)
+	PoissonPMFInto(result, mean)
+	return result
+}
+
+// PoissonPMFInto fills a right-censored Poisson law. The last entry contains
+// P(X >= len(result)-1). Anchoring the recurrence at the mode avoids the
+// exp(-mean) underflow suffered by a recurrence that starts at zero.
+func PoissonPMFInto(result []float64, mean float64) {
+	clear(result)
+	if len(result) == 0 {
+		return
+	}
+	maximum := len(result) - 1
+	if maximum == 0 {
+		result[0] = 1
+		return
+	}
 	if mean <= 0 {
 		result[0] = 1
-		return result
+		return
 	}
-	result[0] = math.Exp(-mean)
-	total := result[0]
-	for k := 1; k < maximum; k++ {
-		result[k] = result[k-1] * mean / float64(k)
-		total += result[k]
+	if math.IsInf(mean, 1) {
+		result[maximum] = 1
+		return
 	}
-	result[maximum] = math.Max(1-total, 0)
+	if math.IsNaN(mean) {
+		result[0] = 1
+		return
+	}
+	anchor := maximum - 1
+	if mean < float64(maximum) {
+		anchor = int(math.Floor(mean))
+	}
+	logFactorial, _ := math.Lgamma(float64(anchor + 1))
+	result[anchor] = math.Exp(float64(anchor)*math.Log(mean) - mean - logFactorial)
+	for k := anchor; k > 0; k-- {
+		result[k-1] = result[k] * float64(k) / mean
+	}
+	for k := anchor; k+1 < maximum; k++ {
+		result[k+1] = result[k] * mean / float64(k+1)
+	}
+	result[maximum] = mathext.GammaIncReg(float64(maximum), mean)
 	NormalizeInPlace(result, nil)
-	return result
 }
 
 func DepositLinear(row, axis []float64, value, weight float64) {
@@ -210,6 +244,28 @@ func DepositLinear(row, axis []float64, value, weight float64) {
 	fraction := (value - axis[lo]) / (axis[hi] - axis[lo])
 	row[lo] += weight * (1 - fraction)
 	row[hi] += weight * fraction
+}
+
+// DepositUniformLinear is the constant-time form of DepositLinear for a
+// strictly increasing, uniformly spaced axis.
+func DepositUniformLinear(row, axis []float64, value, weight float64) {
+	if weight <= 0 || len(axis) == 0 || len(row) != len(axis) {
+		return
+	}
+	last := len(axis) - 1
+	if last == 0 || value <= axis[0] {
+		row[0] += weight
+		return
+	}
+	if value >= axis[last] {
+		row[last] += weight
+		return
+	}
+	coordinate := (value - axis[0]) / (axis[1] - axis[0])
+	lower := min(int(math.Floor(coordinate)), last-1)
+	fraction := Clamp(coordinate-float64(lower), 0, 1)
+	row[lower] += weight * (1 - fraction)
+	row[lower+1] += weight * fraction
 }
 
 func QuantileNormal(index, count int) float64 {

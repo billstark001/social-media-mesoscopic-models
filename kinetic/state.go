@@ -13,7 +13,7 @@ type statePlan struct {
 	structuralScore  func(*state) []float64
 	rewire           func(*state, []float64, []float64)
 	transportMeasure func(*state, *numerics.SparseTransition)
-	transportPDE     func(*state, *numerics.TridiagonalSystem)
+	transportPDE     func(*state, *numerics.TridiagonalSystem) error
 	validate         func(*state) error
 }
 
@@ -28,12 +28,12 @@ type state struct {
 	work2   []float64
 }
 
-func inertInitialize(*state)                            {}
-func inertScore(*state) []float64                       { return nil }
-func inertRewire(*state, []float64, []float64)          {}
-func inertTransport(*state, *numerics.SparseTransition) {}
-func inertDiffuse(*state, *numerics.TridiagonalSystem)  {}
-func inertValidate(*state) error                        { return nil }
+func inertInitialize(*state)                                 {}
+func inertScore(*state) []float64                            { return nil }
+func inertRewire(*state, []float64, []float64)               {}
+func inertTransport(*state, *numerics.SparseTransition)      {}
+func inertDiffuse(*state, *numerics.TridiagonalSystem) error { return nil }
+func inertValidate(*state) error                             { return nil }
 
 func planForState(request RunRequest) statePlan {
 	if normalize(request.Recommender.Type) != "structure_random_l1" {
@@ -148,10 +148,10 @@ func rewireWedge(current *state, edgeBefore, edgeAfter []float64) {
 	}
 	for index := 0; index < size; index++ {
 		if incomingDenominator[index] > 1e-15 {
-			incomingChange[index] = clamp(incomingChange[index]/incomingDenominator[index], 0, 1)
+			incomingChange[index] = numerics.Clamp(incomingChange[index]/incomingDenominator[index], 0, 1)
 		}
 		if outgoingDenominator[index] > 1e-15 {
-			outgoingChange[index] = clamp(outgoingChange[index]/outgoingDenominator[index], 0, 1)
+			outgoingChange[index] = numerics.Clamp(outgoingChange[index]/outgoingDenominator[index], 0, 1)
 		}
 	}
 	directionChange := [2][]float64{incomingChange, outgoingChange}
@@ -176,9 +176,14 @@ func transportWedge(current *state, transition *numerics.SparseTransition) {
 	current.Wedge, current.work1 = current.work1, current.Wedge
 }
 
-func diffuseWedge(current *state, system *numerics.TridiagonalSystem) {
-	numerics.ActiveBackend.TransportTridiagonalTensor3(current.work1, current.work2, current.Wedge, system, wedgeChannels)
+func diffuseWedge(current *state, system *numerics.TridiagonalSystem) error {
+	if err := numerics.ActiveBackend.TransportTridiagonalTensor3(
+		current.work1, current.work2, current.Wedge, system, wedgeChannels,
+	); err != nil {
+		return err
+	}
 	current.Wedge, current.work1 = current.work1, current.Wedge
+	return nil
 }
 
 func validateWedge(current *state) error {

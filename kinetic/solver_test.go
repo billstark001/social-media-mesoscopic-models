@@ -76,6 +76,14 @@ func TestNoObservableProducesNoSeriesPayload(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsOversizedKineticStateBeforeAllocation(t *testing.T) {
+	request := testRequest("hk", "measure", "structure_random_l1")
+	request.OpinionBins = 1 << 30
+	if err := request.Validate(); err == nil {
+		t.Fatal("oversized kinetic request was accepted")
+	}
+}
+
 func TestSelectedSnapshotsAreBinaryAndConservative(t *testing.T) {
 	request := testRequest("hk", "measure", "structure_random_l0")
 	steps, _ := protocol.EncodeFloat64([]float64{0, 2, 4}, 3)
@@ -126,10 +134,15 @@ func TestSelectedSnapshotsAreBinaryAndConservative(t *testing.T) {
 func TestFokkerPlanckFiniteVolumeSystemIsPositiveAndConservative(t *testing.T) {
 	velocity := []float64{-0.1, -0.05, 0, 0.05, 0.1}
 	diffusion := []float64{0.01, 0.02, 0.03, 0.02, 0.01}
-	system := fokkerPlanckSystem(velocity, diffusion, 0.4, 0.25)
+	system, err := fokkerPlanckSystem(velocity, diffusion, 0.4, 0.25)
+	if err != nil {
+		t.Fatal(err)
+	}
 	source := []float64{0.1, 0.2, 0.4, 0.2, 0.1}
 	destination := make([]float64, len(source))
-	numerics.ActiveBackend.ApplyTridiagonal(destination, source, system)
+	if err := numerics.ActiveBackend.ApplyTridiagonal(destination, source, system); err != nil {
+		t.Fatal(err)
+	}
 	total := 0.0
 	for _, value := range destination {
 		if value < -1e-14 {
@@ -161,8 +174,9 @@ func TestGaussLegendreOrderIsExplicitAndExactForLowPolynomials(t *testing.T) {
 
 func TestL1SteepnessUsesScoreDistributionMoment(t *testing.T) {
 	mean := 1.7
-	linear := cappedPoissonPower(mean, 1, 100)
-	quadratic := cappedPoissonPower(mean, 2, 100)
+	pmf := make([]float64, 101)
+	linear := cappedPoissonPower(pmf, mean, 1)
+	quadratic := cappedPoissonPower(pmf, mean, 2)
 	if math.Abs(linear-mean) > 1e-12 {
 		t.Fatalf("linear Poisson moment %g want %g", linear, mean)
 	}

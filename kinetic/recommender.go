@@ -37,7 +37,7 @@ func randomRecommendations(current *state, _ []float64, _ []float64) []float64 {
 func blendRecommendationRows(weighted, random []float64, ratio float64, size int) {
 	for source := 0; source < size; source++ {
 		row := weighted[source*size : (source+1)*size]
-		normalizeRow(row, random[source*size:(source+1)*size])
+		numerics.NormalizeInPlace(row, random[source*size:(source+1)*size])
 		for target := range row {
 			row[target] = (1-ratio)*row[target] + ratio*random[source*size+target]
 		}
@@ -77,29 +77,23 @@ func structureL0Recommendations(current *state, neighbors, _ []float64) []float6
 	return result
 }
 
-// cappedPoissonPower returns E[min(C, scoreMax)^steepness] for a Poisson
-// common-neighbor count. It is exact at steepness=1 as scoreMax grows and,
-// unlike a power of the mean, retains score-count variance.
-func cappedPoissonPower(mean, steepness float64, scoreMax int) float64 {
-	if mean <= 0 {
-		return 0
-	}
-	probability := math.Exp(-mean)
-	cumulative := probability
+// cappedPoissonPower returns E[min(C, len(pmf)-1)^steepness] for a Poisson
+// common-neighbor count, reusing pmf across pairs. It is exact at
+// steepness=1 as the cap grows and retains score-count variance.
+func cappedPoissonPower(pmf []float64, mean, steepness float64) float64 {
+	numerics.PoissonPMFInto(pmf, mean)
 	moment := 0.0
-	for score := 1; score < scoreMax; score++ {
-		probability *= mean / float64(score)
-		cumulative += probability
-		moment += probability * math.Pow(float64(score), steepness)
+	for score := 1; score < len(pmf); score++ {
+		moment += pmf[score] * math.Pow(float64(score), steepness)
 	}
-	tail := math.Max(1-cumulative, 0)
-	return moment + tail*math.Pow(float64(scoreMax), steepness)
+	return moment
 }
 
 func structureL1Recommendations(current *state, _ []float64, structuralScore []float64) []float64 {
 	size := current.request.OpinionBins
 	random := randomKernel(current.Rho, size)
 	result := make([]float64, size*size)
+	pmf := make([]float64, current.request.Resolution.ScoreMax+1)
 	for source := 0; source < size; source++ {
 		for target := 0; target < size; target++ {
 			candidateMass := current.Rho[source] * current.Rho[target]
@@ -114,7 +108,7 @@ func structureL1Recommendations(current *state, _ []float64, structuralScore []f
 					0,
 				)
 				result[source*size+target] = candidateMass * cappedPoissonPower(
-					mean, current.request.Recommender.Steepness, current.request.Resolution.ScoreMax,
+					pmf, mean, current.request.Recommender.Steepness,
 				)
 			}
 		}
