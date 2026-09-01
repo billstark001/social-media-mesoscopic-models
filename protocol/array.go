@@ -11,9 +11,15 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const Float64Encoding = "base64+zlib+f64le"
+const maxDecodedArrayBytes = 512 << 20
+
+var compressedBufferPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+var zlibWriterPool = sync.Pool{New: func() any { return zlib.NewWriter(io.Discard) }}
+var zlibReaderPool sync.Pool
 
 // EncodedArray keeps numerical payloads out of JSON arrays. Shape uses an
 // "x"-separated scalar string so array metadata has one representation too.
@@ -71,23 +77,40 @@ func EncodeFloat64(values []float64, shape ...int) (EncodedArray, error) {
 	if size != len(values) {
 		return EncodedArray{}, fmt.Errorf("shape contains %d values, received %d", size, len(values))
 	}
-	var compressed bytes.Buffer
-	writer := zlib.NewWriter(&compressed)
-	var bits [8]byte
-	for _, value := range values {
-		binary.LittleEndian.PutUint64(bits[:], math.Float64bits(value))
-		if _, err := writer.Write(bits[:]); err != nil {
-			return EncodedArray{}, err
-		}
+	if size > maxDecodedArrayBytes/8 {
+		return EncodedArray{}, fmt.Errorf("encoded array exceeds %d-byte limit", maxDecodedArrayBytes)
 	}
-	if err := writer.Close(); err != nil {
-		return EncodedArray{}, err
+	raw := make([]byte, len(values)*8)
+	for index, value := range values {
+		binary.LittleEndian.PutUint64(raw[index*8:index*8+8], math.Float64bits(value))
 	}
-	return EncodedArray{
+	compressed := compressedBufferPool.Get().(*bytes.Buffer)
+	compressed.Reset()
+	writer := zlibWriterPool.Get().(*zlib.Writer)
+	writer.Reset(compressed)
+	_, writeErr := writer.Write(raw)
+	closeErr := writer.Close()
+	if writeErr != nil {
+		writer.Reset(io.Discard)
+		zlibWriterPool.Put(writer)
+		compressedBufferPool.Put(compressed)
+		return EncodedArray{}, writeErr
+	}
+	if closeErr != nil {
+		writer.Reset(io.Discard)
+		zlibWriterPool.Put(writer)
+		compressedBufferPool.Put(compressed)
+		return EncodedArray{}, closeErr
+	}
+	result := EncodedArray{
 		Encoding: Float64Encoding,
 		Shape:    shapeValue,
 		Data:     base64.StdEncoding.EncodeToString(compressed.Bytes()),
-	}, nil
+	}
+	writer.Reset(io.Discard)
+	zlibWriterPool.Put(writer)
+	compressedBufferPool.Put(compressed)
+	return result, nil
 }
 
 func (array EncodedArray) DecodeFloat64() ([]float64, []int, error) {
@@ -98,24 +121,42 @@ func (array EncodedArray) DecodeFloat64() ([]float64, []int, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if size > maxDecodedArrayBytes/8 {
+		return nil, nil, fmt.Errorf("decoded array exceeds %d-byte limit", maxDecodedArrayBytes)
+	}
 	compressed, err := base64.StdEncoding.DecodeString(array.Data)
 	if err != nil {
 		return nil, nil, fmt.Errorf("decode array base64: %w", err)
 	}
-	reader, err := zlib.NewReader(bytes.NewReader(compressed))
+	var reader io.ReadCloser
+	pooled := zlibReaderPool.Get()
+	if pooled == nil {
+		reader, err = zlib.NewReader(bytes.NewReader(compressed))
+	} else {
+		reader = pooled.(io.ReadCloser)
+		err = pooled.(zlib.Resetter).Reset(bytes.NewReader(compressed), nil)
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("open array zlib stream: %w", err)
 	}
-	raw, readErr := io.ReadAll(io.LimitReader(reader, int64(size)*8+1))
+	raw := make([]byte, size*8)
+	_, readErr := io.ReadFull(reader, raw)
+	var extra [1]byte
+	if readErr == nil {
+		_, readErr = reader.Read(extra[:])
+		if errors.Is(readErr, io.EOF) {
+			readErr = nil
+		} else if readErr == nil {
+			readErr = errors.New("decoded array contains trailing bytes")
+		}
+	}
 	closeErr := reader.Close()
+	zlibReaderPool.Put(reader)
 	if readErr != nil {
 		return nil, nil, fmt.Errorf("read array zlib stream: %w", readErr)
 	}
 	if closeErr != nil {
 		return nil, nil, fmt.Errorf("close array zlib stream: %w", closeErr)
-	}
-	if len(raw) != size*8 {
-		return nil, nil, fmt.Errorf("decoded array has %d bytes, expected %d", len(raw), size*8)
 	}
 	values := make([]float64, size)
 	for index := range values {

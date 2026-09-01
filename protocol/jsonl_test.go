@@ -3,7 +3,9 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 )
 
@@ -78,5 +80,34 @@ func TestFloat64ArrayRoundTrip(t *testing.T) {
 	encoded.Data += "not-base64"
 	if _, _, err := encoded.DecodeFloat64(); err == nil {
 		t.Fatal("corrupt array was accepted")
+	}
+}
+
+func TestFloat64ArrayCodecIsConcurrentAndBounded(t *testing.T) {
+	const workers = 16
+	var wait sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wait.Add(1)
+		go func(seed int) {
+			defer wait.Done()
+			values := []float64{float64(seed), -0.5, 1e20}
+			encoded, err := EncodeFloat64(values, len(values))
+			if err != nil {
+				t.Errorf("encode: %v", err)
+				return
+			}
+			decoded, _, err := encoded.DecodeFloat64()
+			if err != nil || !reflect.DeepEqual(decoded, values) {
+				t.Errorf("round trip: %v %v", decoded, err)
+			}
+		}(worker)
+	}
+	wait.Wait()
+	oversized := EncodedArray{
+		Encoding: Float64Encoding,
+		Shape:    fmt.Sprint(maxDecodedArrayBytes/8 + 1),
+	}
+	if _, _, err := oversized.DecodeFloat64(); err == nil {
+		t.Fatal("oversized encoded array was accepted")
 	}
 }
