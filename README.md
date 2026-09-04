@@ -76,6 +76,19 @@ they are marginal bounds, without a simultaneous or multiple-comparison
 correction. Results include every sampled closure profile and its probability
 vector so downstream audits can reconstruct the envelope.
 
+Terminal categories use the same atomic-measure component functional as the
+microscopic `smp-batch` runtime and Python analysis. Occupied bins are joined
+when their gap is at most the dynamics tolerance; every component must also
+have diameter at most that tolerance before the state is absorbed. Components
+below `major_cluster_mass` remain in `k_all` but not `k_major`. Comparisons
+within `terminal_position_resolution` or `terminal_mass_resolution` of a
+threshold are `grid_ambiguous` and remain censored. The two resolution fields
+are required request provenance; use `(opinion_max-opinion_min)/opinion_bins`
+and `1/population`
+for the standard uniform-bin finite-population protocol. The paper protocol
+uses `major_cluster_mass=0.02`; older `0.002` artifacts belong to a legacy
+classifier protocol and are not silently reinterpreted.
+
 ## Build
 
 The dependency-free build uses the native Go contraction loops:
@@ -157,7 +170,9 @@ auditable. A request has this shape:
   "confidence_level": 0.95,
   "workers": 8,
   "seed": 20260818,
-  "major_cluster_mass": 0.002,
+  "major_cluster_mass": 0.02,
+  "terminal_position_resolution": 0.13333333333333333,
+  "terminal_mass_resolution": 0.002,
   "dynamics": {
     "type": "hk",
     "tolerance": 0.45,
@@ -266,14 +281,20 @@ volume system. Initial categorical densities and every returned scalar series
 use `base64+zlib+f64le`; JSON numerical arrays are not part of the kinetic API.
 Only requested observables are evaluated, and full `rho`, `edge`, and wedge
 trajectories never cross the process boundary.
+Every response diagnostic also reports the maximum node-mass and fixed-degree
+row residual observed over all numerical steps. These are conservation audits,
+not a substitute for a grid-convergence estimate of an observable.
 
 Selected state inspection is a separate opt-in interface. The required
 `snapshots` block contains binary-encoded `record_steps` plus independent
-`rho`, `edge`, `velocity`, and `rewiring_flux` switches. Returned snapshot
-fields use the same compressed binary encoding and include only those steps.
-When every switch is false, `record_steps` has shape `0`; the solver creates no
-snapshot collector and performs no trajectory copies. This keeps scalar scans
-on the original allocation path while supporting reproducible field figures.
+`rho`, `edge`, `velocity`, and `rewiring_flux` history switches, plus
+`final_rho` and `final_edge` switches. Returned snapshot fields use the same
+compressed binary encoding. The final-only fields do not retain their history,
+so terminal density comparisons do not force a large edge trajectory across
+the process boundary. When every history and final switch is false,
+`record_steps` has shape `0`; the solver creates no snapshot collector and
+performs no trajectory copies. This keeps scalar scans on the original
+allocation path while supporting reproducible field figures.
 
 ### Frozen drift-landscape semantics
 

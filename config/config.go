@@ -117,27 +117,29 @@ type AmbiguityConfig struct {
 // RunRequest is deliberately explicit. The JSON decoder checks that every
 // scalar field is present, including fields whose valid value may be zero.
 type RunRequest struct {
-	RequestID           string            `json:"request_id"`
-	Layer               string            `json:"layer"`
-	Population          int               `json:"population"`
-	OpinionBins         int               `json:"opinion_bins"`
-	OutDegree           int               `json:"out_degree"`
-	RecommendationCount int               `json:"recommendation_count"`
-	MaxSteps            int               `json:"max_steps"`
-	Paths               int               `json:"paths"`
-	IntervalPaths       int               `json:"interval_paths"`
-	AmbiguitySamples    int               `json:"ambiguity_samples"`
-	ConfidenceLevel     float64           `json:"confidence_level"`
-	Workers             int               `json:"workers"`
-	Seed                uint64            `json:"seed"`
-	MajorClusterMass    float64           `json:"major_cluster_mass"`
-	Dynamics            DynamicsConfig    `json:"dynamics"`
-	Recommender         RecommenderConfig `json:"recommender"`
-	Initial             InitialConfig     `json:"initial"`
-	Resolution          ResolutionConfig  `json:"resolution"`
-	Closure             ClosureConfig     `json:"closure"`
-	FastSlow            FastSlowConfig    `json:"fast_slow"`
-	Ambiguity           AmbiguityConfig   `json:"ambiguity"`
+	RequestID                  string            `json:"request_id"`
+	Layer                      string            `json:"layer"`
+	Population                 int               `json:"population"`
+	OpinionBins                int               `json:"opinion_bins"`
+	OutDegree                  int               `json:"out_degree"`
+	RecommendationCount        int               `json:"recommendation_count"`
+	MaxSteps                   int               `json:"max_steps"`
+	Paths                      int               `json:"paths"`
+	IntervalPaths              int               `json:"interval_paths"`
+	AmbiguitySamples           int               `json:"ambiguity_samples"`
+	ConfidenceLevel            float64           `json:"confidence_level"`
+	Workers                    int               `json:"workers"`
+	Seed                       uint64            `json:"seed"`
+	MajorClusterMass           float64           `json:"major_cluster_mass"`
+	TerminalPositionResolution float64           `json:"terminal_position_resolution"`
+	TerminalMassResolution     float64           `json:"terminal_mass_resolution"`
+	Dynamics                   DynamicsConfig    `json:"dynamics"`
+	Recommender                RecommenderConfig `json:"recommender"`
+	Initial                    InitialConfig     `json:"initial"`
+	Resolution                 ResolutionConfig  `json:"resolution"`
+	Closure                    ClosureConfig     `json:"closure"`
+	FastSlow                   FastSlowConfig    `json:"fast_slow"`
+	Ambiguity                  AmbiguityConfig   `json:"ambiguity"`
 }
 
 var requiredPaths = [][]string{
@@ -145,6 +147,7 @@ var requiredPaths = [][]string{
 	{"out_degree"}, {"recommendation_count"}, {"max_steps"}, {"paths"},
 	{"interval_paths"}, {"ambiguity_samples"}, {"confidence_level"},
 	{"workers"}, {"seed"}, {"major_cluster_mass"},
+	{"terminal_position_resolution"}, {"terminal_mass_resolution"},
 	{"dynamics", "type"}, {"dynamics", "tolerance"},
 	{"dynamics", "influence"}, {"dynamics", "rewiring_rate"},
 	{"recommender", "type"}, {"recommender", "steepness"},
@@ -241,6 +244,18 @@ func (r RunRequest) Validate() error {
 	}
 	if r.MajorClusterMass <= 0 {
 		return errors.New("major_cluster_mass must be >0")
+	}
+	if err := numerics.CheckNonnegative(
+		"terminal_position_resolution",
+		r.TerminalPositionResolution,
+	); err != nil {
+		return err
+	}
+	if err := numerics.CheckNonnegative(
+		"terminal_mass_resolution",
+		r.TerminalMassResolution,
+	); err != nil {
+		return err
 	}
 
 	dynamics := strings.ToLower(strings.TrimSpace(r.Dynamics.Type))

@@ -2,6 +2,7 @@ package kinetic
 
 import (
 	"fmt"
+	"math"
 	"smp-meso/kinetic/statistics"
 	"smp-meso/numerics"
 	"smp-meso/protocol"
@@ -28,12 +29,14 @@ type Summary struct {
 }
 
 type Diagnostics struct {
-	Backend        string  `json:"backend"`
-	StateDimension int     `json:"state_dimension"`
-	RecordedPoints int     `json:"recorded_points"`
-	ElapsedSeconds float64 `json:"elapsed_seconds"`
-	OpinionMethod  string  `json:"opinion_method"`
-	Recommender    string  `json:"recommender"`
+	Backend                string  `json:"backend"`
+	StateDimension         int     `json:"state_dimension"`
+	RecordedPoints         int     `json:"recorded_points"`
+	ElapsedSeconds         float64 `json:"elapsed_seconds"`
+	OpinionMethod          string  `json:"opinion_method"`
+	Recommender            string  `json:"recommender"`
+	MaxNodeMassResidual    float64 `json:"max_node_mass_residual"`
+	MaxFixedDegreeResidual float64 `json:"max_fixed_degree_residual"`
 }
 
 type Result struct {
@@ -83,11 +86,18 @@ func statisticsPlan(request RunRequest, grid *gridGeometry) *statistics.Plan {
 	})
 }
 
-func resultFromOutcome(request RunRequest, outcome statistics.Outcome, dimension, recorded int, elapsed time.Duration) (Result, error) {
+func resultFromOutcome(
+	request RunRequest,
+	outcome statistics.Outcome,
+	dimension, recorded int,
+	elapsed time.Duration,
+	maxNodeMassResidual, maxFixedDegreeResidual float64,
+) (Result, error) {
 	result := Result{RequestID: request.RequestID, Diagnostics: Diagnostics{
 		Backend: numerics.ActiveBackend.Name(), StateDimension: dimension, RecordedPoints: recorded,
 		ElapsedSeconds: elapsed.Seconds(), OpinionMethod: normalize(request.Dynamics.OpinionMethod),
-		Recommender: normalize(request.Recommender.Type),
+		Recommender: normalize(request.Recommender.Type), MaxNodeMassResidual: maxNodeMassResidual,
+		MaxFixedDegreeResidual: maxFixedDegreeResidual,
 	}}
 	var err error
 	if result.Series.Time, err = encoded(outcome.Time); err != nil {
@@ -116,6 +126,25 @@ func resultFromOutcome(request RunRequest, outcome statistics.Outcome, dimension
 		result.Summary.HomophilyFirstPassage = passage(outcome.HomophilyPass)
 	}
 	return result, nil
+}
+
+func conservationResiduals(current *state) (float64, float64) {
+	total := 0.0
+	for _, value := range current.Rho {
+		total += value
+	}
+	nodeResidual := math.Abs(total - 1)
+	degreeResidual := 0.0
+	size := current.request.OpinionBins
+	degree := float64(current.request.OutDegree)
+	for source := 0; source < size; source++ {
+		row := 0.0
+		for target := 0; target < size; target++ {
+			row += current.Edge[source*size+target]
+		}
+		degreeResidual = math.Max(degreeResidual, math.Abs(row-degree*current.Rho[source]))
+	}
+	return nodeResidual, degreeResidual
 }
 
 func Run(request RunRequest) (Result, error) {
@@ -154,6 +183,7 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 	}
 	emit(protocol.ProgressEvent{Event: "request_started"})
 	measure.Record(0, current.Rho, current.Edge)
+	maxNodeMassResidual, maxFixedDegreeResidual := conservationResiduals(current)
 	recorded := 1
 	workspace := newStepWorkspace(request.OpinionBins)
 	for step := 1; step <= request.Steps; step++ {
@@ -177,6 +207,9 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 		if err := current.validate(); err != nil {
 			return Result{}, fmt.Errorf("step %d: %w", step, err)
 		}
+		nodeResidual, degreeResidual := conservationResiduals(current)
+		maxNodeMassResidual = math.Max(maxNodeMassResidual, nodeResidual)
+		maxFixedDegreeResidual = math.Max(maxFixedDegreeResidual, degreeResidual)
 		if step%request.RecordEvery == 0 || step == request.Steps {
 			measure.Record(float64(step)*request.Dt, current.Rho, current.Edge)
 			recorded++
@@ -198,11 +231,19 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 	}
 	outcome := measure.Outcome()
 	dimension := len(current.Rho) + len(current.Edge) + len(current.Wedge)
-	result, err := resultFromOutcome(request, outcome, dimension, recorded, time.Since(started))
+	result, err := resultFromOutcome(
+		request,
+		outcome,
+		dimension,
+		recorded,
+		time.Since(started),
+		maxNodeMassResidual,
+		maxFixedDegreeResidual,
+	)
 	if err != nil {
 		return Result{}, err
 	}
-	result.Snapshots, err = snapshots.outcome()
+	result.Snapshots, err = snapshots.outcome(current)
 	if err != nil {
 		return Result{}, err
 	}

@@ -38,6 +38,8 @@ def request(request_id: str, layer: str, seed: int) -> dict[str, object]:
         "workers": 1,
         "seed": seed,
         "major_cluster_mass": 0.05,
+        "terminal_position_resolution": 0.0,
+        "terminal_mass_resolution": 0.0,
         "dynamics": {
             "type": "hk",
             "tolerance": 0.45,
@@ -146,6 +148,8 @@ def kinetic_request(request_id: str, recommender: str) -> dict[str, object]:
             "edge": False,
             "velocity": False,
             "rewiring_flux": False,
+            "final_rho": False,
+            "final_edge": False,
         },
     }
 
@@ -319,6 +323,8 @@ for batch_index, line in enumerate(sys.stdin, 1):
             "edge": True,
             "velocity": True,
             "rewiring_flux": False,
+            "final_rho": True,
+            "final_edge": True,
         }
         response = run_kinetic_batch(self.kinetic_binary, [item])[0]
         snapshots = response["result"]["snapshots"]
@@ -327,6 +333,8 @@ for batch_index, line in enumerate(sys.stdin, 1):
         self.assertEqual(snapshots["edge"].shape, (3, 7, 7))
         self.assertEqual(snapshots["velocity"].shape, (3, 7))
         self.assertNotIn("rewiring_flux", snapshots)
+        self.assertEqual(snapshots["final_rho"].shape, (7,))
+        self.assertEqual(snapshots["final_edge"].shape, (7, 7))
 
 
 if __name__ == "__main__":

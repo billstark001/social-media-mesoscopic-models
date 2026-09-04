@@ -8,9 +8,11 @@ import (
 // SnapshotSeries contains only explicitly requested state fields. Every field
 // is binary encoded; snapshots never enter the scalar observable Series.
 type SnapshotSeries struct {
-	Time *protocol.EncodedArray `json:"time"`
-	Rho  *protocol.EncodedArray `json:"rho,omitempty"`
-	Edge *protocol.EncodedArray `json:"edge,omitempty"`
+	Time      *protocol.EncodedArray `json:"time"`
+	Rho       *protocol.EncodedArray `json:"rho,omitempty"`
+	Edge      *protocol.EncodedArray `json:"edge,omitempty"`
+	FinalRho  *protocol.EncodedArray `json:"final_rho,omitempty"`
+	FinalEdge *protocol.EncodedArray `json:"final_edge,omitempty"`
 	// Velocity is the coefficient-bearing finite-exposure drift. It retains
 	// the C=0 no-update event rather than using E[S]/E[C].
 	Velocity     *protocol.EncodedArray `json:"velocity,omitempty"`
@@ -35,7 +37,7 @@ func newSnapshotCollector(request RunRequest) (*snapshotCollector, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(steps) == 0 {
+	if len(steps) == 0 && !request.Snapshots.FinalRho && !request.Snapshots.FinalEdge {
 		return nil, nil
 	}
 	count := len(steps)
@@ -105,7 +107,7 @@ func encodeSnapshot(values []float64, shape ...int) (*protocol.EncodedArray, err
 	return &encoded, nil
 }
 
-func (collector *snapshotCollector) outcome() (*SnapshotSeries, error) {
+func (collector *snapshotCollector) outcome(final *state) (*SnapshotSeries, error) {
 	if collector == nil {
 		return nil, nil
 	}
@@ -130,6 +132,16 @@ func (collector *snapshotCollector) outcome() (*SnapshotSeries, error) {
 	}
 	if result.RewiringFlux, err = encodeSnapshot(collector.rewiringFlux, count, size, size); err != nil {
 		return nil, err
+	}
+	if collector.request.Snapshots.FinalRho {
+		if result.FinalRho, err = encodeSnapshot(final.Rho, size); err != nil {
+			return nil, err
+		}
+	}
+	if collector.request.Snapshots.FinalEdge {
+		if result.FinalEdge, err = encodeSnapshot(final.Edge, size, size); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }

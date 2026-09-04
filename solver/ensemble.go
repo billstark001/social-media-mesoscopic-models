@@ -59,7 +59,9 @@ func runPath(
 	if err != nil {
 		return PathOutcome{}, err
 	}
-	if category, terminal := terminalCategory(state, request); terminal {
+	if category, terminal, err := terminalCategory(state, request); err != nil {
+		return PathOutcome{}, err
+	} else if terminal {
 		return PathOutcome{Category: category, StateDimension: state.Dimension()}, nil
 	}
 	rewiringEvents := 0
@@ -84,7 +86,9 @@ func runPath(
 		if progressStepInterval > 0 && step%progressStepInterval == 0 && onStep != nil {
 			onStep(step)
 		}
-		if category, terminal := terminalCategory(state, request); terminal {
+		if category, terminal, err := terminalCategory(state, request); err != nil {
+			return PathOutcome{}, fmt.Errorf("classify terminal state at step %d: %w", step, err)
+		} else if terminal {
 			return PathOutcome{
 				Category: category, Steps: step, RewiringEvents: rewiringEvents,
 				StateDimension: state.Dimension(), FastSlowApplied: fastSlowApplied,

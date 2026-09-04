@@ -64,6 +64,8 @@ type SnapshotsConfig struct {
 	Edge         bool                  `json:"edge"`
 	Velocity     bool                  `json:"velocity"`
 	RewiringFlux bool                  `json:"rewiring_flux"`
+	FinalRho     bool                  `json:"final_rho"`
+	FinalEdge    bool                  `json:"final_edge"`
 }
 
 // RunRequest is fully explicit: the strict decoder requires every field even
@@ -120,6 +122,7 @@ var requiredPaths = [][]string{
 	{"snapshots", "record_steps", "data"},
 	{"snapshots", "rho"}, {"snapshots", "edge"},
 	{"snapshots", "velocity"}, {"snapshots", "rewiring_flux"},
+	{"snapshots", "final_rho"}, {"snapshots", "final_edge"},
 }
 
 func DecodeRequest(data []byte) (RunRequest, error) {
@@ -335,6 +338,20 @@ func (request RunRequest) validateWorkingSet(snapshotCount int) error {
 		return err
 	}
 	total, err = numerics.CheckedSum("kinetic working set", total, snapshots)
+	if err != nil {
+		return err
+	}
+	finalOutput := 0
+	if request.Snapshots.FinalRho {
+		finalOutput, err = numerics.CheckedSum("kinetic final snapshot", finalOutput, size)
+	}
+	if err == nil && request.Snapshots.FinalEdge {
+		finalOutput, err = numerics.CheckedSum("kinetic final snapshot", finalOutput, square)
+	}
+	if err != nil {
+		return err
+	}
+	total, err = numerics.CheckedSum("kinetic working set", total, finalOutput)
 	if err != nil {
 		return err
 	}

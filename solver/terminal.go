@@ -1,9 +1,9 @@
 package solver
 
 import (
-	"math"
 	"smp-meso/config"
 	"smp-meso/lifted"
+	"smp-meso/terminal"
 )
 
 var Categories = []string{"k1", "k2", "k3", "k4plus", "censored"}
@@ -21,46 +21,21 @@ func categoryIndex(clusterCount int) int {
 	}
 }
 
-// terminalCategory returns an absorbing major-cluster category. Every occupied
-// confidence component must have diameter no larger than tolerance; minor
-// components remain part of the invariance check but are not counted as major.
-func terminalCategory(state *lifted.State, request config.RunRequest) (int, bool) {
-	occupiedThreshold := 0.5 / float64(state.Population)
-	occupied := make([]int, 0, state.Bins)
-	for index, mass := range state.Rho {
-		if mass >= occupiedThreshold {
-			occupied = append(occupied, index)
-		}
+// terminalCategory applies the common measure-level classifier. Ambiguous or
+// nonterminal states continue until a later step or are censored at the horizon.
+func terminalCategory(state *lifted.State, request config.RunRequest) (int, bool, error) {
+	result, err := terminal.Classify(state.Axis, state.Rho, terminal.Options{
+		Epsilon:            request.Dynamics.Tolerance,
+		OccupiedMass:       0.5 / float64(state.Population),
+		MajorMass:          request.MajorClusterMass,
+		PositionResolution: request.TerminalPositionResolution,
+		MassResolution:     request.TerminalMassResolution,
+	})
+	if err != nil {
+		return 0, false, err
 	}
-	if len(occupied) == 0 {
-		return 0, false
+	if result.Status != terminal.StatusAbsorbed {
+		return 0, false, nil
 	}
-	components := [][]int{{occupied[0]}}
-	for _, index := range occupied[1:] {
-		last := components[len(components)-1]
-		if state.Axis[index]-state.Axis[last[len(last)-1]] > request.Dynamics.Tolerance {
-			components = append(components, []int{index})
-		} else {
-			components[len(components)-1] = append(last, index)
-		}
-	}
-	majorCount := 0
-	largestMass := 0.0
-	for _, component := range components {
-		if state.Axis[component[len(component)-1]]-state.Axis[component[0]] > request.Dynamics.Tolerance {
-			return 0, false
-		}
-		mass := 0.0
-		for _, index := range component {
-			mass += state.Rho[index]
-		}
-		largestMass = math.Max(largestMass, mass)
-		if mass >= request.MajorClusterMass {
-			majorCount++
-		}
-	}
-	if majorCount == 0 && largestMass > 0 {
-		majorCount = 1
-	}
-	return categoryIndex(majorCount), true
+	return categoryIndex(result.KMajor), true, nil
 }

@@ -134,6 +134,38 @@ func TestSelectedSnapshotsAreBinaryAndConservative(t *testing.T) {
 	}
 }
 
+func TestFinalSnapshotsDoNotRetainFieldHistories(t *testing.T) {
+	request := testRequest("deffuant", "measure", "random")
+	request.Snapshots.FinalRho = true
+	request.Snapshots.FinalEdge = true
+	result, err := Run(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Snapshots == nil || result.Snapshots.Rho != nil || result.Snapshots.Edge != nil {
+		t.Fatalf("unexpected historical snapshot payload: %+v", result.Snapshots)
+	}
+	rho, rhoShape, err := result.Snapshots.FinalRho.DecodeFloat64()
+	if err != nil || len(rhoShape) != 1 || rhoShape[0] != request.OpinionBins {
+		t.Fatalf("invalid final rho shape %v: %v", rhoShape, err)
+	}
+	edge, edgeShape, err := result.Snapshots.FinalEdge.DecodeFloat64()
+	if err != nil || len(edgeShape) != 2 || edgeShape[0] != request.OpinionBins || edgeShape[1] != request.OpinionBins {
+		t.Fatalf("invalid final edge shape %v: %v", edgeShape, err)
+	}
+	rhoMass := 0.0
+	for _, value := range rho {
+		rhoMass += value
+	}
+	edgeMass := 0.0
+	for _, value := range edge {
+		edgeMass += value
+	}
+	if math.Abs(rhoMass-1) > 1e-12 || math.Abs(edgeMass-float64(request.OutDegree)) > 1e-10 {
+		t.Fatalf("invalid final masses rho=%g edge=%g", rhoMass, edgeMass)
+	}
+}
+
 func TestFokkerPlanckFiniteVolumeSystemIsPositiveAndConservative(t *testing.T) {
 	velocity := []float64{-0.1, -0.05, 0, 0.05, 0.1}
 	diffusion := []float64{0.01, 0.02, 0.03, 0.02, 0.01}
