@@ -15,6 +15,8 @@ type Series struct {
 	Subjective   *protocol.EncodedArray `json:"subjective,omitempty"`
 	Homophily    *protocol.EncodedArray `json:"homophily,omitempty"`
 	HomophilyRaw *protocol.EncodedArray `json:"homophily_raw,omitempty"`
+	NodeEnergy   *protocol.EncodedArray `json:"node_energy,omitempty"`
+	EdgeEnergy   *protocol.EncodedArray `json:"edge_energy,omitempty"`
 }
 
 type PassageResult struct {
@@ -37,6 +39,13 @@ type Diagnostics struct {
 	Recommender            string  `json:"recommender"`
 	MaxNodeMassResidual    float64 `json:"max_node_mass_residual"`
 	MaxFixedDegreeResidual float64 `json:"max_fixed_degree_residual"`
+	ExecutedSteps          int     `json:"executed_steps"`
+	StopReason             string  `json:"stop_reason"`
+	Converged              bool    `json:"converged"`
+	FinalStateL1Rate       float64 `json:"final_state_l1_rate"`
+	FinalNodeEnergyRate    float64 `json:"final_node_energy_rate"`
+	FinalEdgeEnergyRate    float64 `json:"final_edge_energy_rate"`
+	StableSteps            int     `json:"stable_steps"`
 }
 
 type Result struct {
@@ -72,6 +81,7 @@ func statisticsPlan(request RunRequest, grid *gridGeometry) *statistics.Plan {
 	return statistics.NewPlan(grid.Axis, grid.Concordance, statistics.Config{
 		Polarization: observables.Polarization, Subjective: observables.Subjective,
 		Homophily: observables.Homophily, HomophilyRaw: observables.HomophilyRaw,
+		NodeEnergy: observables.NodeEnergy, EdgeEnergy: observables.EdgeEnergy,
 		Pathway:                   observables.Pathway,
 		PolarizationFirstPassage:  observables.PolarizationFirstPassage,
 		HomophilyFirstPassage:     observables.HomophilyFirstPassage,
@@ -92,12 +102,16 @@ func resultFromOutcome(
 	dimension, recorded int,
 	elapsed time.Duration,
 	maxNodeMassResidual, maxFixedDegreeResidual float64,
+	executedSteps int, stopping stoppingStatus,
 ) (Result, error) {
 	result := Result{RequestID: request.RequestID, Diagnostics: Diagnostics{
 		Backend: numerics.ActiveBackend.Name(), StateDimension: dimension, RecordedPoints: recorded,
 		ElapsedSeconds: elapsed.Seconds(), OpinionMethod: normalize(request.Dynamics.OpinionMethod),
 		Recommender: normalize(request.Recommender.Type), MaxNodeMassResidual: maxNodeMassResidual,
-		MaxFixedDegreeResidual: maxFixedDegreeResidual,
+		MaxFixedDegreeResidual: maxFixedDegreeResidual, ExecutedSteps: executedSteps,
+		StopReason: stopping.reason, Converged: stopping.stop,
+		FinalStateL1Rate: stopping.stateL1Rate, FinalNodeEnergyRate: stopping.nodeEnergyRate,
+		FinalEdgeEnergyRate: stopping.edgeEnergyRate, StableSteps: stopping.stableSteps,
 	}}
 	var err error
 	if result.Series.Time, err = encoded(outcome.Time); err != nil {
@@ -113,6 +127,12 @@ func resultFromOutcome(
 		return Result{}, err
 	}
 	if result.Series.HomophilyRaw, err = encoded(outcome.HomophilyRaw); err != nil {
+		return Result{}, err
+	}
+	if result.Series.NodeEnergy, err = encoded(outcome.NodeEnergy); err != nil {
+		return Result{}, err
+	}
+	if result.Series.EdgeEnergy, err = encoded(outcome.EdgeEnergy); err != nil {
 		return Result{}, err
 	}
 	if outcome.HasPathway {
@@ -167,7 +187,7 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 	recommend := planRecommender(request)
 	advanceOpinion := planOpinionEvolution(request, grid)
 	measure := statisticsPlan(request, grid)
-	snapshots, err := newSnapshotCollector(request)
+	snapshots, err := newSnapshotCollector(request, grid.Axis)
 	if err != nil {
 		return Result{}, err
 	}
@@ -185,6 +205,9 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 	measure.Record(0, current.Rho, current.Edge)
 	maxNodeMassResidual, maxFixedDegreeResidual := conservationResiduals(current)
 	recorded := 1
+	executedSteps := 0
+	stopStatus := stoppingStatus{reason: "max_steps"}
+	stopper := newStoppingPlan(request, grid.Axis, current)
 	workspace := newStepWorkspace(request.OpinionBins)
 	for step := 1; step <= request.Steps; step++ {
 		structuralScore := current.plan.structuralScore(current)
@@ -217,15 +240,30 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 		if progressStepInterval > 0 && step%progressStepInterval == 0 {
 			emit(protocol.ProgressEvent{Event: "step_heartbeat", Step: step})
 		}
+		executedSteps = step
+		status := stopper.check(step, current)
+		if status.stop {
+			stopStatus = status
+			if step%request.RecordEvery != 0 && step != request.Steps {
+				measure.Record(float64(step)*request.Dt, current.Rho, current.Edge)
+				recorded++
+			}
+			break
+		}
 	}
-	if snapshots != nil && snapshots.wants(request.Steps) {
+	if !stopStatus.stop && normalize(request.Stopping.Mode) != "fixed_steps" {
+		stopStatus = stopper.status
+		stopStatus.reason = "max_steps"
+		stopStatus.stop = false
+	}
+	if snapshots != nil && snapshots.wants(executedSteps) {
 		var finalFields *fields
 		if snapshots.requiresField {
 			structuralScore := current.plan.structuralScore(current)
 			values := computeFields(current, recommend, structuralScore)
 			finalFields = &values
 		}
-		if err := snapshots.record(request.Steps, current, finalFields); err != nil {
+		if err := snapshots.record(executedSteps, current, finalFields); err != nil {
 			return Result{}, fmt.Errorf("snapshot at final step: %w", err)
 		}
 	}
@@ -239,6 +277,8 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 		time.Since(started),
 		maxNodeMassResidual,
 		maxFixedDegreeResidual,
+		executedSteps,
+		stopStatus,
 	)
 	if err != nil {
 		return Result{}, err
@@ -247,6 +287,6 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 	if err != nil {
 		return Result{}, err
 	}
-	emit(protocol.ProgressEvent{Event: "request_completed", Step: request.Steps, StateDimension: dimension})
+	emit(protocol.ProgressEvent{Event: "request_completed", Step: executedSteps, StateDimension: dimension})
 	return result, nil
 }

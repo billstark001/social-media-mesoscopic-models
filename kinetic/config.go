@@ -46,6 +46,8 @@ type ObservablesConfig struct {
 	Subjective                bool    `json:"subjective"`
 	Homophily                 bool    `json:"homophily"`
 	HomophilyRaw              bool    `json:"homophily_raw"`
+	NodeEnergy                bool    `json:"node_energy"`
+	EdgeEnergy                bool    `json:"edge_energy"`
 	Pathway                   bool    `json:"pathway"`
 	PolarizationFirstPassage  bool    `json:"polarization_first_passage"`
 	HomophilyFirstPassage     bool    `json:"homophily_first_passage"`
@@ -55,17 +57,34 @@ type ObservablesConfig struct {
 	ObjectiveEffectiveSamples int     `json:"objective_effective_samples"`
 }
 
+// StoppingConfig keeps Steps as an unconditional safety ceiling while
+// allowing convergence to terminate a trajectory earlier. Changes are
+// measured between checkpoints and divided by the number of elapsed steps.
+type StoppingConfig struct {
+	Mode                    string  `json:"mode"`
+	MinimumSteps            int     `json:"minimum_steps"`
+	CheckEvery              int     `json:"check_every"`
+	PatienceSteps           int     `json:"patience_steps"`
+	StateL1Tolerance        float64 `json:"state_l1_tolerance"`
+	EnergyAbsoluteTolerance float64 `json:"energy_absolute_tolerance"`
+	EnergyRelativeTolerance float64 `json:"energy_relative_tolerance"`
+}
+
 // SnapshotsConfig requests selected state fields at explicitly encoded
 // numerical steps. With every field false, record_steps must encode shape 0
 // and the solver does not allocate a snapshot collector.
 type SnapshotsConfig struct {
-	RecordSteps  protocol.EncodedArray `json:"record_steps"`
-	Rho          bool                  `json:"rho"`
-	Edge         bool                  `json:"edge"`
-	Velocity     bool                  `json:"velocity"`
-	RewiringFlux bool                  `json:"rewiring_flux"`
-	FinalRho     bool                  `json:"final_rho"`
-	FinalEdge    bool                  `json:"final_edge"`
+	RecordSteps        protocol.EncodedArray `json:"record_steps"`
+	Rho                bool                  `json:"rho"`
+	Edge               bool                  `json:"edge"`
+	Velocity           bool                  `json:"velocity"`
+	RewiringFlux       bool                  `json:"rewiring_flux"`
+	NodePotential      bool                  `json:"node_potential"`
+	EdgePotential      bool                  `json:"edge_potential"`
+	FinalRho           bool                  `json:"final_rho"`
+	FinalEdge          bool                  `json:"final_edge"`
+	FinalNodePotential bool                  `json:"final_node_potential"`
+	FinalEdgePotential bool                  `json:"final_edge_potential"`
 }
 
 // RunRequest is fully explicit: the strict decoder requires every field even
@@ -88,6 +107,7 @@ type RunRequest struct {
 	Resolution          ResolutionConfig  `json:"resolution"`
 	Observables         ObservablesConfig `json:"observables"`
 	Snapshots           SnapshotsConfig   `json:"snapshots"`
+	Stopping            StoppingConfig    `json:"stopping"`
 }
 
 var requiredPaths = [][]string{
@@ -109,6 +129,7 @@ var requiredPaths = [][]string{
 	{"resolution", "score_max"}, {"resolution", "distance_grid_size"},
 	{"observables", "polarization"}, {"observables", "subjective"},
 	{"observables", "homophily"}, {"observables", "homophily_raw"},
+	{"observables", "node_energy"}, {"observables", "edge_energy"},
 	{"observables", "pathway"},
 	{"observables", "polarization_first_passage"},
 	{"observables", "homophily_first_passage"},
@@ -122,7 +143,14 @@ var requiredPaths = [][]string{
 	{"snapshots", "record_steps", "data"},
 	{"snapshots", "rho"}, {"snapshots", "edge"},
 	{"snapshots", "velocity"}, {"snapshots", "rewiring_flux"},
+	{"snapshots", "node_potential"}, {"snapshots", "edge_potential"},
 	{"snapshots", "final_rho"}, {"snapshots", "final_edge"},
+	{"snapshots", "final_node_potential"}, {"snapshots", "final_edge_potential"},
+	{"stopping", "mode"}, {"stopping", "minimum_steps"},
+	{"stopping", "check_every"}, {"stopping", "patience_steps"},
+	{"stopping", "state_l1_tolerance"},
+	{"stopping", "energy_absolute_tolerance"},
+	{"stopping", "energy_relative_tolerance"},
 }
 
 func DecodeRequest(data []byte) (RunRequest, error) {
@@ -187,12 +215,15 @@ func (request RunRequest) Validate() error {
 	}
 	for name, value := range map[string]float64{
 		"dt": request.Dt, "noise_diffusion": request.NoiseDiffusion,
-		"opinion_min":       request.Initial.OpinionMin,
-		"opinion_max":       request.Initial.OpinionMax,
-		"tolerance":         request.Dynamics.Tolerance,
-		"steepness":         request.Recommender.Steepness,
-		"opinion_tolerance": request.Recommender.OpinionTolerance,
-		"minimum_bandwidth": request.Observables.MinimumBandwidth,
+		"opinion_min":               request.Initial.OpinionMin,
+		"opinion_max":               request.Initial.OpinionMax,
+		"tolerance":                 request.Dynamics.Tolerance,
+		"steepness":                 request.Recommender.Steepness,
+		"opinion_tolerance":         request.Recommender.OpinionTolerance,
+		"minimum_bandwidth":         request.Observables.MinimumBandwidth,
+		"state_l1_tolerance":        request.Stopping.StateL1Tolerance,
+		"energy_absolute_tolerance": request.Stopping.EnergyAbsoluteTolerance,
+		"energy_relative_tolerance": request.Stopping.EnergyRelativeTolerance,
 	} {
 		if err := numerics.CheckFinite(name, value); err != nil {
 			return err
@@ -242,6 +273,21 @@ func (request RunRequest) Validate() error {
 	}
 	if request.Observables.MinimumBandwidth <= 0 || request.Observables.ObjectiveEffectiveSamples < 1 {
 		return errors.New("minimum_bandwidth and objective_effective_samples must be positive")
+	}
+	if !oneOf(request.Stopping.Mode, "fixed_steps", "state", "energy", "state_and_energy", "state_or_energy") {
+		return fmt.Errorf("unsupported stopping mode %q", request.Stopping.Mode)
+	}
+	if request.Stopping.MinimumSteps < 0 || request.Stopping.MinimumSteps > request.Steps {
+		return errors.New("stopping.minimum_steps must lie in [0,steps]")
+	}
+	if request.Stopping.CheckEvery < 1 || request.Stopping.PatienceSteps < 1 {
+		return errors.New("stopping.check_every and stopping.patience_steps must be positive")
+	}
+	if !oneOf(request.Stopping.Mode, "fixed_steps") && request.Stopping.CheckEvery > request.Steps {
+		return errors.New("adaptive stopping.check_every must not exceed steps")
+	}
+	if request.Stopping.StateL1Tolerance < 0 || request.Stopping.EnergyAbsoluteTolerance < 0 || request.Stopping.EnergyRelativeTolerance < 0 {
+		return errors.New("stopping tolerances must be nonnegative")
 	}
 	if err := numerics.CheckUnit("polarization_threshold", request.Observables.PolarizationThreshold); err != nil {
 		return err
@@ -330,6 +376,12 @@ func (request RunRequest) validateWorkingSet(snapshotCount int) error {
 	if err == nil && request.Snapshots.RewiringFlux {
 		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, square)
 	}
+	if err == nil && request.Snapshots.NodePotential {
+		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, size)
+	}
+	if err == nil && request.Snapshots.EdgePotential {
+		perSnapshot, err = numerics.CheckedSum("kinetic snapshot", perSnapshot, size)
+	}
 	if err != nil {
 		return err
 	}
@@ -347,6 +399,12 @@ func (request RunRequest) validateWorkingSet(snapshotCount int) error {
 	}
 	if err == nil && request.Snapshots.FinalEdge {
 		finalOutput, err = numerics.CheckedSum("kinetic final snapshot", finalOutput, square)
+	}
+	if err == nil && request.Snapshots.FinalNodePotential {
+		finalOutput, err = numerics.CheckedSum("kinetic final snapshot", finalOutput, size)
+	}
+	if err == nil && request.Snapshots.FinalEdgePotential {
+		finalOutput, err = numerics.CheckedSum("kinetic final snapshot", finalOutput, size)
 	}
 	if err != nil {
 		return err
@@ -367,7 +425,8 @@ func (request RunRequest) snapshotSteps() ([]int, error) {
 		return nil, errors.New("snapshots.record_steps must be one-dimensional")
 	}
 	requested := request.Snapshots.Rho || request.Snapshots.Edge ||
-		request.Snapshots.Velocity || request.Snapshots.RewiringFlux
+		request.Snapshots.Velocity || request.Snapshots.RewiringFlux ||
+		request.Snapshots.NodePotential || request.Snapshots.EdgePotential
 	if !requested {
 		if shape[0] != 0 {
 			return nil, errors.New("snapshots.record_steps must have shape 0 when no snapshot field is requested")

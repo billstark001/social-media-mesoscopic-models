@@ -9,6 +9,8 @@ type Config struct {
 	Subjective                bool
 	Homophily                 bool
 	HomophilyRaw              bool
+	NodeEnergy                bool
+	EdgeEnergy                bool
 	Pathway                   bool
 	PolarizationFirstPassage  bool
 	HomophilyFirstPassage     bool
@@ -34,6 +36,8 @@ type Outcome struct {
 	Subjective       []float64
 	Homophily        []float64
 	HomophilyRaw     []float64
+	NodeEnergy       []float64
+	EdgeEnergy       []float64
 	Pathway          float64
 	HasPathway       bool
 	PolarizationPass FirstPassage
@@ -60,6 +64,9 @@ type Plan struct {
 	subjective       []float64
 	homophily        []float64
 	homophilyRaw     []float64
+	nodeEnergy       []float64
+	edgeEnergy       []float64
+	interaction      *InteractionPlan
 }
 
 func NewPlan(axis, concordance []float64, config Config) *Plan {
@@ -69,11 +76,14 @@ func NewPlan(axis, concordance []float64, config Config) *Plan {
 		needPolarization: config.Polarization || config.Pathway || config.PolarizationFirstPassage,
 		needSubjective:   config.Subjective,
 		needHomophily:    config.Homophily || config.HomophilyRaw || config.Pathway || config.HomophilyFirstPassage,
-		storeTime:        config.Polarization || config.Subjective || config.Homophily || config.HomophilyRaw,
-		retainTime:       config.Polarization || config.Subjective || config.Homophily || config.HomophilyRaw || config.PolarizationFirstPassage || config.HomophilyFirstPassage,
+		storeTime:        config.Polarization || config.Subjective || config.Homophily || config.HomophilyRaw || config.NodeEnergy || config.EdgeEnergy,
+		retainTime:       config.Polarization || config.Subjective || config.Homophily || config.HomophilyRaw || config.NodeEnergy || config.EdgeEnergy || config.PolarizationFirstPassage || config.HomophilyFirstPassage,
 	}
 	if result.needPolarization || result.needSubjective {
 		result.prepareDistances()
+	}
+	if config.NodeEnergy || config.EdgeEnergy {
+		result.interaction = NewInteractionPlan(axis, config.Tolerance, config.OutDegree)
 	}
 	return result
 }
@@ -121,6 +131,15 @@ func (plan *Plan) Record(time float64, rho, edge []float64) {
 		plan.homophily = append(plan.homophily, homophily)
 		plan.homophilyRaw = append(plan.homophilyRaw, raw)
 	}
+	if plan.interaction != nil {
+		node, edgeValue := plan.interaction.Energies(rho, edge)
+		if plan.config.NodeEnergy {
+			plan.nodeEnergy = append(plan.nodeEnergy, node)
+		}
+		if plan.config.EdgeEnergy {
+			plan.edgeEnergy = append(plan.edgeEnergy, edgeValue)
+		}
+	}
 }
 
 func firstPassage(values, times []float64, threshold float64) FirstPassage {
@@ -148,6 +167,12 @@ func (plan *Plan) Outcome() Outcome {
 	}
 	if plan.config.HomophilyRaw {
 		result.HomophilyRaw = append([]float64(nil), plan.homophilyRaw...)
+	}
+	if plan.config.NodeEnergy {
+		result.NodeEnergy = append([]float64(nil), plan.nodeEnergy...)
+	}
+	if plan.config.EdgeEnergy {
+		result.EdgeEnergy = append([]float64(nil), plan.edgeEnergy...)
 	}
 	if plan.config.Pathway {
 		result.HasPathway = true

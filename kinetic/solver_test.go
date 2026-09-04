@@ -29,6 +29,9 @@ func testRequest(dynamics, method, recommender string) RunRequest {
 			MinimumBandwidth: 0.01, ObjectiveEffectiveSamples: 10000,
 		},
 		Snapshots: SnapshotsConfig{RecordSteps: empty},
+		Stopping: StoppingConfig{
+			Mode: "fixed_steps", MinimumSteps: 0, CheckEvery: 1, PatienceSteps: 1,
+		},
 	}
 }
 
@@ -76,6 +79,97 @@ func TestNoObservableProducesNoSeriesPayload(t *testing.T) {
 	}
 	if result.Snapshots != nil {
 		t.Fatal("disabled snapshots allocated an output payload")
+	}
+}
+
+func TestInteractionEnergiesAndPotentialSnapshots(t *testing.T) {
+	request := testRequest("hk", "measure", "random")
+	request.Dynamics.Influence = 0
+	request.Dynamics.RewiringRate = 0
+	request.Steps = 1
+	request.RecordEvery = 1
+	request.Observables = ObservablesConfig{
+		NodeEnergy: true, EdgeEnergy: true,
+		PolarizationThreshold: 0.2, HomophilyThreshold: 0.2,
+		MinimumBandwidth: 0.01, ObjectiveEffectiveSamples: 100,
+	}
+	steps, _ := protocol.EncodeFloat64([]float64{0, 1}, 2)
+	request.Snapshots = SnapshotsConfig{
+		RecordSteps: steps, NodePotential: true, EdgePotential: true,
+	}
+	result, err := Run(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeEnergy, _, err := result.Series.NodeEnergy.DecodeFloat64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	edgeEnergy, _, err := result.Series.EdgeEnergy.DecodeFloat64()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodeEnergy) != 2 || len(edgeEnergy) != 2 {
+		t.Fatalf("unexpected energy lengths %d %d", len(nodeEnergy), len(edgeEnergy))
+	}
+	for index := range nodeEnergy {
+		if math.Abs(edgeEnergy[index]-2*nodeEnergy[index]) > 1e-14 {
+			t.Fatalf("random-mixing identity failed: U=%g U_E=%g", nodeEnergy[index], edgeEnergy[index])
+		}
+	}
+	nodePotential, shape, err := result.Snapshots.NodePotential.DecodeFloat64()
+	if err != nil || len(shape) != 2 || shape[0] != 2 || shape[1] != request.OpinionBins {
+		t.Fatalf("invalid node potential shape %v: %v", shape, err)
+	}
+	edgePotential, edgeShape, err := result.Snapshots.EdgePotential.DecodeFloat64()
+	if err != nil || len(edgeShape) != 2 || len(edgePotential) != len(nodePotential) {
+		t.Fatalf("invalid edge potential shape %v: %v", edgeShape, err)
+	}
+	for index := range nodePotential {
+		if math.Abs(nodePotential[index]-edgePotential[index]) > 1e-14 {
+			t.Fatalf("random-mixing potential identity failed at %d", index)
+		}
+	}
+}
+
+func TestAdaptiveStoppingReturnsReachedSnapshotsAndActualFinalState(t *testing.T) {
+	request := testRequest("hk", "measure", "random")
+	request.Dynamics.Influence = 0
+	request.Dynamics.RewiringRate = 0
+	request.Steps = 10
+	request.RecordEvery = 3
+	request.Stopping = StoppingConfig{
+		Mode: "state_and_energy", MinimumSteps: 3, CheckEvery: 1, PatienceSteps: 2,
+		StateL1Tolerance: 1e-15, EnergyAbsoluteTolerance: 1e-15,
+	}
+	steps, _ := protocol.EncodeFloat64([]float64{0, 10}, 2)
+	request.Snapshots = SnapshotsConfig{
+		RecordSteps: steps, Rho: true, FinalRho: true,
+		FinalNodePotential: true, FinalEdgePotential: true,
+	}
+	result, err := Run(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Diagnostics.Converged || result.Diagnostics.ExecutedSteps != 4 ||
+		result.Diagnostics.StopReason != "converged_state_and_energy" {
+		t.Fatalf("unexpected stopping diagnostics: %+v", result.Diagnostics)
+	}
+	times, shape, err := result.Snapshots.Time.DecodeFloat64()
+	if err != nil || len(shape) != 1 || shape[0] != 1 || len(times) != 1 || times[0] != 0 {
+		t.Fatalf("adaptive snapshot prefix is invalid: %v %v %v", times, shape, err)
+	}
+	_, finalShape, err := result.Snapshots.FinalRho.DecodeFloat64()
+	if err != nil || len(finalShape) != 1 || finalShape[0] != request.OpinionBins {
+		t.Fatalf("adaptive final state is invalid: %v %v", finalShape, err)
+	}
+	_, finalPotentialShape, err := result.Snapshots.FinalNodePotential.DecodeFloat64()
+	if err != nil || len(finalPotentialShape) != 1 || finalPotentialShape[0] != request.OpinionBins {
+		t.Fatalf("adaptive final potential is invalid: %v %v", finalPotentialShape, err)
+	}
+	seriesTimes, _, err := result.Series.Time.DecodeFloat64()
+	if err != nil || seriesTimes[len(seriesTimes)-1] != 0.4 {
+		t.Fatalf("final adaptive scalar record missing: %v %v", seriesTimes, err)
 	}
 }
 

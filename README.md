@@ -285,16 +285,80 @@ Every response diagnostic also reports the maximum node-mass and fixed-degree
 row residual observed over all numerical steps. These are conservation audits,
 not a substitute for a grid-convergence estimate of an observable.
 
+The scalar observables additionally include the bounded-confidence interaction
+energies
+
+```text
+W_ij  = 0.5 min((x_i-x_j)^2, epsilon^2)
+U_rho = 0.5 sum_ij W_ij rho_i rho_j
+U_E   = sum_ij W_ij E_ij / out_degree.
+```
+
+They are selected with `observables.node_energy` and
+`observables.edge_energy`. Solver arrays are finite-volume masses, so these
+sums contain no extra grid-spacing factor. The energies are diagnostics of the
+adaptive dynamics, not asserted to be global Lyapunov functions.
+
 Selected state inspection is a separate opt-in interface. The required
 `snapshots` block contains binary-encoded `record_steps` plus independent
-`rho`, `edge`, `velocity`, and `rewiring_flux` history switches, plus
-`final_rho` and `final_edge` switches. Returned snapshot fields use the same
+`rho`, `edge`, `velocity`, `rewiring_flux`, `node_potential`, and
+`edge_potential` history switches, plus `final_rho`, `final_edge`,
+`final_node_potential`, and `final_edge_potential` switches. Returned snapshot fields use the same
 compressed binary encoding. The final-only fields do not retain their history,
 so terminal density comparisons do not force a large edge trajectory across
 the process boundary. When every history and final switch is false,
 `record_steps` has shape `0`; the solver creates no snapshot collector and
 performs no trajectory copies. This keeps scalar scans on the original
 allocation path while supporting reproducible field figures.
+
+The history switches `node_potential` and `edge_potential` return
+
+```text
+Phi_rho_i = sum_j W_ij rho_j
+Phi_E_i   = sum_j W_ij E_ij / sum_j E_ij.
+```
+
+`Phi_E_i` is encoded as `NaN` for an empty source row. Potential histories are
+computed only at `snapshots.record_steps`; requesting scalar energies does not
+retain either state field.
+
+### Kinetic stopping
+
+`steps` is always the hard safety ceiling. The required `stopping` block
+chooses `fixed_steps`, `state`, `energy`, `state_and_energy`, or
+`state_or_energy`. Adaptive modes compare checkpoints separated by
+`check_every` steps. The state criterion is
+
+```text
+max(||Delta rho||_1, ||Delta E||_1/out_degree) / elapsed_steps
+    <= state_l1_tolerance,
+```
+
+and the energy criterion requires both energy rates to be below
+
+```text
+energy_absolute_tolerance
+    + energy_relative_tolerance * max(|previous|, |current|).
+```
+
+A criterion must remain satisfied for `patience_steps` after `minimum_steps`.
+Diagnostics report `executed_steps`, `stop_reason`, `converged`, the final
+checkpoint rates, and the accumulated stable steps. If adaptive stopping fires
+before a requested snapshot time, the response contains the reached prefix;
+all `final_*` fields still refer to the actual stopping state. A fixed
+run uses:
+
+```json
+"stopping": {
+  "mode": "fixed_steps",
+  "minimum_steps": 0,
+  "check_every": 1,
+  "patience_steps": 1,
+  "state_l1_tolerance": 0.0,
+  "energy_absolute_tolerance": 0.0,
+  "energy_relative_tolerance": 0.0
+}
+```
 
 ### Frozen drift-landscape semantics
 

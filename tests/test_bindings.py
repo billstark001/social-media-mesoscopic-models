@@ -134,6 +134,8 @@ def kinetic_request(request_id: str, recommender: str) -> dict[str, object]:
             "subjective": True,
             "homophily": True,
             "homophily_raw": True,
+            "node_energy": True,
+            "edge_energy": True,
             "pathway": True,
             "polarization_first_passage": True,
             "homophily_first_passage": True,
@@ -148,8 +150,21 @@ def kinetic_request(request_id: str, recommender: str) -> dict[str, object]:
             "edge": False,
             "velocity": False,
             "rewiring_flux": False,
+            "node_potential": False,
+            "edge_potential": False,
             "final_rho": False,
             "final_edge": False,
+            "final_node_potential": False,
+            "final_edge_potential": False,
+        },
+        "stopping": {
+            "mode": "fixed_steps",
+            "minimum_steps": 0,
+            "check_every": 1,
+            "patience_steps": 1,
+            "state_l1_tolerance": 0.0,
+            "energy_absolute_tolerance": 0.0,
+            "energy_relative_tolerance": 0.0,
         },
     }
 
@@ -323,8 +338,12 @@ for batch_index, line in enumerate(sys.stdin, 1):
             "edge": True,
             "velocity": True,
             "rewiring_flux": False,
+            "node_potential": True,
+            "edge_potential": True,
             "final_rho": True,
             "final_edge": True,
+            "final_node_potential": True,
+            "final_edge_potential": True,
         }
         response = run_kinetic_batch(self.kinetic_binary, [item])[0]
         snapshots = response["result"]["snapshots"]
@@ -332,9 +351,13 @@ for batch_index, line in enumerate(sys.stdin, 1):
         self.assertEqual(snapshots["rho"].shape, (3, 7))
         self.assertEqual(snapshots["edge"].shape, (3, 7, 7))
         self.assertEqual(snapshots["velocity"].shape, (3, 7))
+        self.assertEqual(snapshots["node_potential"].shape, (3, 7))
+        self.assertEqual(snapshots["edge_potential"].shape, (3, 7))
         self.assertNotIn("rewiring_flux", snapshots)
         self.assertEqual(snapshots["final_rho"].shape, (7,))
         self.assertEqual(snapshots["final_edge"].shape, (7, 7))
+        self.assertEqual(snapshots["final_node_potential"].shape, (7,))
+        self.assertEqual(snapshots["final_edge_potential"].shape, (7,))
 
 
 if __name__ == "__main__":
