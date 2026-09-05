@@ -202,6 +202,7 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 		progress(event)
 	}
 	emit(protocol.ProgressEvent{Event: "request_started"})
+	measure.ObservePathway(current.Rho, current.Edge)
 	measure.Record(0, current.Rho, current.Edge)
 	maxNodeMassResidual, maxFixedDegreeResidual := conservationResiduals(current)
 	recorded := 1
@@ -230,6 +231,7 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 		if err := current.validate(); err != nil {
 			return Result{}, fmt.Errorf("step %d: %w", step, err)
 		}
+		measure.ObservePathway(current.Rho, current.Edge)
 		nodeResidual, degreeResidual := conservationResiduals(current)
 		maxNodeMassResidual = math.Max(maxNodeMassResidual, nodeResidual)
 		maxFixedDegreeResidual = math.Max(maxFixedDegreeResidual, degreeResidual)

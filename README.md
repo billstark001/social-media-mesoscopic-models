@@ -299,6 +299,12 @@ They are selected with `observables.node_energy` and
 sums contain no extra grid-spacing factor. The energies are diagnostics of the
 adaptive dynamics, not asserted to be global Lyapunov functions.
 
+When `observables.pathway` is enabled, the solver accumulates the trapezoidal
+line integral `H dP` at every numerical step and adds the terminal completion
+term. Only the final scalar is returned; no polarization or homophily history
+is retained solely for the pathway, and `record_every` affects other returned
+series but not the pathway value.
+
 Selected state inspection is a separate opt-in interface. The required
 `snapshots` block contains binary-encoded `record_steps` plus independent
 `rho`, `edge`, `velocity`, `rewiring_flux`, `node_potential`, and

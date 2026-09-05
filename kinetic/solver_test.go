@@ -60,6 +60,36 @@ func TestAllDynamicsMethodsAndRecommendersRun(t *testing.T) {
 	}
 }
 
+func TestPathwayIsIndependentOfSeriesRecordEvery(t *testing.T) {
+	for _, dynamics := range []string{"hk", "deffuant"} {
+		for _, method := range []string{"measure", "fokker_planck"} {
+			fineRequest := testRequest(dynamics, method, "random")
+			fineRequest.Steps = 5
+			fineRequest.RecordEvery = 1
+			coarseRequest := fineRequest
+			coarseRequest.RecordEvery = 3
+			fine, err := Run(fineRequest)
+			if err != nil {
+				t.Fatalf("fine %s/%s: %v", dynamics, method, err)
+			}
+			coarse, err := Run(coarseRequest)
+			if err != nil {
+				t.Fatalf("coarse %s/%s: %v", dynamics, method, err)
+			}
+			if fine.Summary.Pathway == nil || coarse.Summary.Pathway == nil {
+				t.Fatalf("missing pathway for %s/%s", dynamics, method)
+			}
+			if *fine.Summary.Pathway != *coarse.Summary.Pathway {
+				t.Fatalf("record cadence changed pathway for %s/%s: %.17g != %.17g",
+					dynamics, method, *fine.Summary.Pathway, *coarse.Summary.Pathway)
+			}
+			if fine.Diagnostics.RecordedPoints == coarse.Diagnostics.RecordedPoints {
+				t.Fatalf("test did not vary recorded points for %s/%s", dynamics, method)
+			}
+		}
+	}
+}
+
 func TestNoObservableProducesNoSeriesPayload(t *testing.T) {
 	request := testRequest("hk", "measure", "random")
 	request.Observables = ObservablesConfig{

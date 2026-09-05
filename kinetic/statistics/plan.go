@@ -67,19 +67,23 @@ type Plan struct {
 	nodeEnergy       []float64
 	edgeEnergy       []float64
 	interaction      *InteractionPlan
+	pathwayValue     float64
+	pathwayPreviousP float64
+	pathwayPreviousH float64
+	pathwayStarted   bool
 }
 
 func NewPlan(axis, concordance []float64, config Config) *Plan {
 	result := &Plan{
 		config: config, axis: append([]float64(nil), axis...),
 		concordance:      append([]float64(nil), concordance...),
-		needPolarization: config.Polarization || config.Pathway || config.PolarizationFirstPassage,
+		needPolarization: config.Polarization || config.PolarizationFirstPassage,
 		needSubjective:   config.Subjective,
-		needHomophily:    config.Homophily || config.HomophilyRaw || config.Pathway || config.HomophilyFirstPassage,
+		needHomophily:    config.Homophily || config.HomophilyRaw || config.HomophilyFirstPassage,
 		storeTime:        config.Polarization || config.Subjective || config.Homophily || config.HomophilyRaw || config.NodeEnergy || config.EdgeEnergy,
 		retainTime:       config.Polarization || config.Subjective || config.Homophily || config.HomophilyRaw || config.NodeEnergy || config.EdgeEnergy || config.PolarizationFirstPassage || config.HomophilyFirstPassage,
 	}
-	if result.needPolarization || result.needSubjective {
+	if result.needPolarization || result.needSubjective || config.Pathway {
 		result.prepareDistances()
 	}
 	if config.NodeEnergy || config.EdgeEnergy {
@@ -114,6 +118,24 @@ func (plan *Plan) prepareDistances() {
 		plan.subjectiveWorst = normalPDF(plan.distanceAxis, 0, plan.config.MinimumBandwidth)
 		plan.subjectiveScale = jsDistance(plan.subjectiveWorst, plan.randomPDF, plan.distanceAxis)
 	}
+}
+
+// ObservePathway accumulates the trapezoidal line integral H dP at every
+// solver step without retaining the polarization or homophily trajectory.
+// The completion term is added only when Outcome is requested.
+func (plan *Plan) ObservePathway(rho, edge []float64) {
+	if !plan.config.Pathway {
+		return
+	}
+	polarization := plan.calculatePolarization(rho)
+	homophily, _ := plan.calculateHomophily(edge)
+	if plan.pathwayStarted {
+		plan.pathwayValue += 0.5 * (polarization - plan.pathwayPreviousP) *
+			(homophily + plan.pathwayPreviousH)
+	}
+	plan.pathwayPreviousP = polarization
+	plan.pathwayPreviousH = homophily
+	plan.pathwayStarted = true
 }
 
 func (plan *Plan) Record(time float64, rho, edge []float64) {
@@ -176,13 +198,9 @@ func (plan *Plan) Outcome() Outcome {
 	}
 	if plan.config.Pathway {
 		result.HasPathway = true
-		if len(plan.polarization) > 0 {
-			for index := 1; index < len(plan.polarization); index++ {
-				result.Pathway += 0.5 * (plan.polarization[index] - plan.polarization[index-1]) *
-					(plan.homophily[index] + plan.homophily[index-1])
-			}
-			last := len(plan.polarization) - 1
-			result.Pathway += (1 - plan.polarization[last]) * plan.homophily[last]
+		if plan.pathwayStarted {
+			result.Pathway = plan.pathwayValue +
+				(1-plan.pathwayPreviousP)*plan.pathwayPreviousH
 		}
 	}
 	if plan.config.PolarizationFirstPassage {
