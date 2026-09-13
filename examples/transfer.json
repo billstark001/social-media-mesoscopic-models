@@ -1,0 +1,89 @@
+{
+  "request_id": "structure-comparison",
+  "population": 500,
+  "opinion_bins": 15,
+  "out_degree": 15,
+  "recommendation_count": 10,
+  "max_steps": 2000,
+  "workers": 4,
+  "major_cluster_mass": 0.02,
+  "terminal_position_resolution": 0.13333333333333333,
+  "terminal_mass_resolution": 0.002,
+  "dynamics": {
+    "influence": 0.046415888336127795,
+    "rewiring_rate": 0.046415888336127795,
+    "tolerance": 0.45,
+    "type": "hk"
+  },
+  "recommender": {
+    "noise_quadrature_points": 9,
+    "noise_std": 0.0,
+    "opinion_tolerance": 0.4,
+    "random_ratio": 0.0,
+    "steepness": 4.0,
+    "type": "structure_random"
+  },
+  "initial": {
+    "opinion_max": 1.0,
+    "opinion_min": -1.0,
+    "probabilities": {
+      "encoding": "base64+zlib+f64le",
+      "shape": "0",
+      "data": "eJwDAAAAAAE="
+    },
+    "type": "uniform"
+  },
+  "resolution": {
+    "score_max": 45,
+    "opinion_quadrature_points": 7,
+    "opinion_quadrature_rule": "unit_variance_quantile"
+  },
+  "closure": {
+    "motif_relaxation": 0.25
+  },
+  "variants": [
+    {
+      "layer": "naive",
+      "evolution": "deterministic"
+    },
+    {
+      "layer": "base",
+      "evolution": "deterministic"
+    },
+    {
+      "layer": "naive",
+      "evolution": "stochastic"
+    },
+    {
+      "layer": "base",
+      "evolution": "stochastic"
+    }
+  ],
+  "snapshots": {
+    "rho": true,
+    "edge": false,
+    "candidate": false,
+    "score": false,
+    "final_rho": true,
+    "final_edge": true,
+    "final_candidate": false,
+    "final_score": false,
+    "record_steps": {
+      "encoding": "base64+zlib+f64le",
+      "shape": "5",
+      "data": "eJxjYEAGng4QOhNCO/RD6fkOACZIA2E="
+    }
+  },
+  "seeds": [
+    {
+      "replicate": 0,
+      "init_seed": 202610630000,
+      "process_seed": 203510630000
+    },
+    {
+      "replicate": 1,
+      "init_seed": 202610630001,
+      "process_seed": 203510630001
+    }
+  ]
+}

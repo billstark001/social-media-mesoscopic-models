@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "smp-meso-bindings"
 version = "0.1.0"
-description = "Batch Python orchestration for the Go SMP lifted and kinetic solvers"
+description = "Batch Python orchestration for the Go SMP lifted, kinetic and transfer solvers"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24"]

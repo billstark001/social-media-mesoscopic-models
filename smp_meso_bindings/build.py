@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 Backend = Literal["purego", "openblas", "accelerate"]
-Command = Literal["lifted", "kinetic"]
+Command = Literal["lifted", "kinetic", "transfer"]
 
 
 def _source_root(source_root: os.PathLike[str] | str | None) -> Path:
@@ -86,7 +86,7 @@ def build_binary(
         command.extend(["-tags", "accelerate"])
     elif backend != "purego":
         raise ValueError(f"unsupported backend {backend!r}")
-    if command_name not in {"lifted", "kinetic"}:
+    if command_name not in {"lifted", "kinetic", "transfer"}:
         raise ValueError(f"unsupported command {command_name!r}")
     command.append(f"./cmd/smp-{command_name}")
     subprocess.run(command, cwd=root, env=environment, check=True)
@@ -97,7 +97,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root")
     parser.add_argument("--output")
-    parser.add_argument("--command", choices=("lifted", "kinetic"), required=True)
+    parser.add_argument("--command", choices=("lifted", "kinetic", "transfer"), required=True)
     parser.add_argument(
         "--backend", choices=("purego", "openblas", "accelerate"), required=True
     )

@@ -1,10 +1,12 @@
 # social-media-mesoscopic-models
 
-Go runtimes for two mesoscopic reductions of the social-media opinion model:
+Go runtimes for mesoscopic reductions of the social-media opinion model:
 
 - `smp-lifted`: finite-`N` stochastic lifted terminal probabilities;
 - `smp-kinetic`: deterministic measure or strong-form Fokker--Planck
-  evolution with online density observables and no full-trajectory output.
+  evolution with online density observables and no full-trajectory output;
+- `smp-transfer`: paired deterministic/stochastic `naive` and `base`
+  finite-exposure experiments with explicit initial and continuation seeds.
 
 The implementation is deliberately split into ordinary Go packages (there is
 no `internal` tree):
@@ -15,11 +17,12 @@ no `internal` tree):
 - `lifted`: the six nested retained states, unsplit law, and conditional fast-absorption law;
 - `solver`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
+- `transfer`: paired terminal experiments, path provenance, and selected state snapshots;
 - `kinetic`: nonlocal measure and finite-volume Fokker--Planck dynamics;
 - `kinetic/statistics`: requested-only online density observables;
 - `protocol`: recoverable JSONL batch transport;
 - `command`: the shared run/batch command adapter;
-- `cmd/smp-lifted` and `cmd/smp-kinetic`: thin executable adapters.
+- `cmd/smp-lifted`, `cmd/smp-kinetic`, and `cmd/smp-transfer`: thin executable adapters.
 
 The Python package `smp_meso_bindings` builds and orchestrates the Go binary.
 It sends all parameter points in one JSONL stream, so a scan does not create a
@@ -32,7 +35,7 @@ All masses use a per-agent normalization. The six nested layers are:
 | request value | retained coordinates beyond `rho,E` | ambiguity removed from the preceding layer |
 |---|---|---|
 | `naive` / `rho_edge` | none; `C,S_zeta` are reconstructed workspaces, not transported state | none |
-| `base` / `l0` | candidate mass `C` and the requested powered score mass `S_zeta` | none |
+| `base` / `l0` | transported powered score mass `S_zeta`, with candidate mass `C` reconstructed after transport | none |
 | `wedge` / `l1` | candidate-weighted centre-opinion wedge `W` | first-score/motif allocation |
 | `histogram` / `l2` | agent histogram `H_i(k,d,c)` | discordant-followee/concordant-feed eligibility coupling |
 | `candidate` / `l3` | score/availability measure `Xi_ij(a,s)` | candidate availability--score coupling |
@@ -40,7 +43,7 @@ All masses use a per-agent normalization. The six nested layers are:
 
 This is an information-sufficiency ladder, not a claim that the final layer is
 an exact lumping of the microscopic Markov chain. Each retained coordinate is
-transported explicitly, while its rewiring-created higher hierarchy is relaxed
+handled by its layer plan, while its rewiring-created higher hierarchy is relaxed
 toward an independently reconstructed target using the supplied closure rates.
 For the `wedge` and `histogram` layers, rewiring updates `S_zeta` from the
 resolved first moment in `W`: the projection is exact at `zeta=1`, while higher
@@ -96,10 +99,11 @@ The dependency-free build uses the native Go contraction loops:
 ```sh
 go build -o bin/smp-lifted ./cmd/smp-lifted
 go build -o bin/smp-kinetic ./cmd/smp-kinetic
+go build -o bin/smp-transfer ./cmd/smp-transfer
 go test ./...
 ```
 
-The repository Makefile provides the same default workflow and keeps both
+The repository Makefile provides the same default workflow and keeps all three
 binaries under `bin/`:
 
 ```sh
@@ -117,6 +121,7 @@ On macOS, Accelerate is optional:
 ```sh
 go build -tags accelerate -o bin/smp-lifted ./cmd/smp-lifted
 go build -tags accelerate -o bin/smp-kinetic ./cmd/smp-kinetic
+go build -tags accelerate -o bin/smp-transfer ./cmd/smp-transfer
 go test -tags accelerate ./...
 ```
 
@@ -142,12 +147,18 @@ order can change last-bit results.
 
 ## Resource limits
 
-Both solvers validate dimension products before allocating and reject requests
+All solvers validate dimension products before allocating and reject requests
 whose conservatively estimated concurrent working set exceeds 512 MiB. Each
 `base64+zlib+f64le` field is likewise limited to 512 MiB after decompression,
 and its decoded byte count must exactly match its declared shape. These are
 recoverable request errors in JSONL batch mode rather than allocation panics or
 process-wide failures.
+
+Transfer requests also budget retained path results and selected snapshot
+histories across all seeds and variants, including compression workspace. Large
+scans should be split into JSONL requests rather than collecting every path in
+one response. `workers` limits concurrent paths within a request; Python
+`processes` limits concurrent requests, so their product controls concurrency.
 
 ## Lifted request
 
@@ -270,6 +281,225 @@ bin/smp-kinetic batch --progress jsonl --progress-step-interval 1000 \
 Events identify the request and batch line, point/interval stage, interval
 scenario, completed paths, last terminal category, elapsed time, and periodic
 within-path step. Enabling telemetry does not change random streams.
+
+## Transfer-operator experiments
+
+`smp-transfer` promotes the shared-state deterministic experiment into a
+standalone, supported runtime. It uses the same `naive`/`base` layer names and
+aliases as `smp-lifted`; a separate `evolution` selects `deterministic` or
+`stochastic`. There are no numbered experiment-route names in the API.
+
+| layer | evolution | structural score | state advancement |
+|---|---|---|---|
+| `naive` | `deterministic` | reconstructed from `rho,E` | continuous-mass plug-in mean |
+| `base` | `deterministic` | transported and candidate-rescaled | continuous-mass plug-in mean |
+| `naive` | `stochastic` | reconstructed from `rho,E` | original unsplit lifted step |
+| `base` | `stochastic` | transported and candidate-rescaled | original unsplit lifted step |
+
+This runner supports HK and Deffuant, all three lifted recommenders and both
+normal quadrature rules. It uses the zero closure profile and the unsplit law.
+Higher retained layers, ambiguity envelopes and conditional fast absorption
+remain available through `smp-lifted`; they are not accepted experiment options.
+The lifted and kinetic request schemas and random streams are unchanged.
+
+### Deterministic update
+
+Both evolutions construct the same finite-exposure node kernel `T`, including
+concordant binomial counts, conditional opinion variance and finite-candidate
+corrections. Deterministic evolution replaces coarse draws with mass updates:
+
+```text
+a_i = min(rho_i * q * eligibility_i, discordant_edge_mass_i)
+E_rewired_ij = E_ij + a_i * (gain_ij - loss_ij)
+rho_next = rho T
+E_next = row_normalize(T^T E_rewired T, out_degree * rho_next)
+```
+
+`T` is computed at the old state, before rewiring. The `base` layer also uses
+
+```text
+theta = motif_relaxation * (1 - (1 - global_edge_change)^2)
+S_rewired = (1 - theta) S + theta S_independent(rho, E_rewired)
+S_transport = T^T S_rewired T
+C_transport = T^T C_old T
+C_next = reconstruct_candidates(rho_next, E_next)
+S_next = S_transport * C_next / C_transport
+```
+
+The final expression is entrywise; a numerically zero denominator sets that
+score entry to zero. `naive` instead reconstructs `S_next` directly. Candidate
+mass is algebraic in both layers. Only StructureRandom reads the score, so
+Random/OpinionRandom provide exact paired controls for score-memory ablation.
+
+This is a deterministic nonlinear state map, whose push-forward of an initial
+ensemble defines the transfer-operator experiment; no additional Ulam state
+partition is needed. It retains finite-exposure opinion dispersion and is not
+the historical drift-only PDE. It is also not the full conditional mean of
+the stochastic step: random reclassification covariances, discrete caps, and
+nonlinear score/normalization operations do not commute with expectation.
+The implementation lives in [lifted/deterministic.go](lifted/deterministic.go).
+
+### Explicit request and paired seeds
+
+[examples/transfer.json](examples/transfer.json) is a complete runnable request:
+
+```sh
+make build-transfer
+bin/smp-transfer run @examples/transfer.json
+bin/smp-transfer batch --progress jsonl --progress-step-interval 1000 \
+  < requests.jsonl > responses.jsonl 2> progress.jsonl
+```
+
+Every field in the example is required, including false snapshot switches and
+empty encoded arrays. Unknown, missing and null fields are rejected, including
+inside seed and variant records. Physical parameters use the lifted names and
+validation. The reduced `resolution` block contains `score_max`,
+`opinion_quadrature_points`, and `opinion_quadrature_rule`; `closure` contains
+only `motif_relaxation`. There is no hidden conversion of terminal margins when
+`opinion_bins` changes: the caller must set both resolution fields explicitly.
+
+The experiment-specific fields are:
+
+```json
+"variants": [
+  {"layer": "naive", "evolution": "deterministic"},
+  {"layer": "base", "evolution": "deterministic"},
+  {"layer": "naive", "evolution": "stochastic"},
+  {"layer": "base", "evolution": "stochastic"}
+],
+"seeds": [
+  {"replicate": 0, "init_seed": 202610630000, "process_seed": 203510630000},
+  {"replicate": 1, "init_seed": 202610630001, "process_seed": 203510630001}
+]
+```
+
+Each seed record runs every selected variant. `replicate` is a unique,
+nonnegative pairing identifier; it does not seed a random stream. Both seeds
+are explicit uint64 JSON integers, including values above `2^53`; they are
+never encoded as float64 arrays. Initialization uses PCG `(s, s XOR 0xcafe)`;
+stochastic continuation uses a separate PCG `(p, p XOR 0xbeef)`. Deterministic
+evolution never consumes the continuation stream. A SHA-256 hash of the initial
+`[rho, edge, candidate, score]` JSON masses is returned for every path. The axis
+and model request must also match when interpreting hashes across requests.
+
+To extend a fixed coarse initial state, repeat `init_seed`, use new
+`process_seed` values and unique replicate identifiers. To extend an initial
+ensemble, append new explicit seed records. Request IDs, worker counts,
+variant order and progress reporting do not enter the random streams. Reusing
+seeds across different grids does **not** project a common microscopic graph
+onto those grids: the multinomial initial state law changes with the grid.
+
+### Path output and terminal semantics
+
+Responses use the shared `{request_id, result}` / `{request_id, error}` envelope.
+Errors abort that request and are never scored as scientific censoring; batch
+mode continues to the next request. Successful output contains:
+
+- `axis`: encoded opinion centres;
+- `paths`: seed-major, variant-minor records in request order, irrespective of
+  worker completion order; layer aliases are canonicalized;
+- per-path `layer`, `evolution`, both seeds, `replicate`, `initial_hash`,
+  `category`, `status`, `steps`, elapsed time and maximum node/edge-row residuals;
+- `final_primary`: the full shared terminal classifier at the stopping state;
+- `point_hit`: first zero-margin absorption `{step, category}`, or null;
+- `final_point`: the zero-margin classifier at the final primary stopping
+  state, which need not agree with the earlier `point_hit`;
+- `summaries`: per-variant primary and first-hit counts/probabilities in the
+  category order `[k1,k2,k3,k4plus,censored]`, plus mean steps;
+- `diagnostics`: numerical backend, seed scheme and total elapsed time.
+
+The primary criterion uses the supplied position/mass margins and stops at
+absorption, including at step zero; `max_steps` is the hard horizon. The
+diagnostic removes only the two margins. Both use occupied mass `0.5/population`
+and the requested `major_cluster_mass`. A diagnostic first hit does not stop
+the path and is not asserted to be invariant under the numerical closure.
+Paths unresolved by the primary criterion at the horizon remain censored.
+
+`snapshots.record_steps` is a strictly increasing encoded vector of integer
+steps between zero and `max_steps`. At reached requested steps the response
+records `steps`, `score_sum` and `change` (maximum absolute one-step rho change).
+Independent `rho`, `edge`, `candidate`, and `score` switches select state
+histories. `final_rho`, `final_edge`, `final_candidate`, and `final_score`
+select only the actual stopping state and do not allocate their histories.
+History arrays have shape `(reached_steps, B)` or `(reached_steps, B, B)`;
+final arrays have shape `(B,)` or `(B, B)`. No unreached snapshots are invented.
+All these arrays and the initial categorical probabilities use the shared
+`base64+zlib+f64le` protocol. Empty `record_steps` disables history copies.
+
+### Python transfer interface
+
+```python
+import json
+from copy import deepcopy
+from pathlib import Path
+
+import numpy as np
+from smp_meso_bindings import (
+    build_binary, compare_transfer_variants,
+    run_transfer, run_transfer_batch_parallel,
+)
+
+binary = build_binary(command_name="transfer", backend="purego")
+request = json.loads(Path("examples/transfer.json").read_text())
+# Bindings accept NumPy arrays or already encoded payloads without mutating input.
+request["snapshots"]["record_steps"] = np.array([0, 50, 200, 1000, 2000])
+response = run_transfer(binary, request)
+comparison = compare_transfer_variants(
+    response, ("naive", "deterministic"), ("base", "deterministic"),
+    criterion="primary",  # also "point_hit" or "final_point"
+)
+print(comparison["total_variation"], comparison["disagreement"])
+rho = response["result"]["paths"][0]["snapshots"]["final_rho"]  # NumPy (B,)
+
+fine = deepcopy(request)
+fine["request_id"] = "structure-comparison-fine"
+fine["opinion_bins"] = 21
+fine["terminal_position_resolution"] = 2 / 21
+fine["terminal_mass_resolution"] = 1 / fine["population"]
+responses = run_transfer_batch_parallel(binary, [request, fine], processes=2)
+```
+
+`run_transfer_batch` reuses one Go process. The parallel variant uses the same
+dynamic scheduler, ordered responses, `check`, `environment`, and progress
+callback options as the existing bindings. With `check=False`, failed items
+remain error envelopes while successful arrays are still decoded.
+
+To derive an experiment from an existing lifted request, use
+`make_transfer_request(lifted_request, variants=..., seeds=..., snapshots=...)`.
+It copies shared physics and terminal controls, retaining only the relevant
+resolution and motif fields. The old layer, ensemble seed/counts, ambiguity
+and fast-slow controls explicitly do not carry over; no model values are
+defaulted. Neither this conversion nor execution mutates the caller's inputs.
+
+`compare_transfer_variants` checks replicate pairing and initial hashes, then
+returns a category confusion matrix, disagreement rate, both marginal
+probability vectors and their TV distance. Similar marginal probabilities can
+hide many paired switches. These are descriptive comparisons, not equivalence
+tests or micro-reference accuracy scores. To score against a separately
+validated microscopic probability vector `p_micro` in the same category order:
+
+```python
+for summary in response["result"]["summaries"]:
+    p = np.asarray(summary["primary"]["probabilities"])
+    tv = 0.5 * np.abs(p - p_micro).sum()
+```
+
+Micro-reference generation, bootstrap sampling units and classifier matching
+remain explicit analysis choices. The runtime does not read a microscopic
+benchmark while predicting or calibrate to it. Conditional continuations with
+the same initial seed should not be treated as independent initial graphs.
+
+### Transfer validation
+
+`go test ./...` includes archived trajectory parity fixtures for all four
+layer/evolution combinations, node-mean sampling checks, conservation and
+repeatability, worker/progress invariance, seed separation, strict decoding,
+memory limits and step-zero absorption. The fixture records its source hash
+and is self-contained; production execution never imports an artifact tree.
+`make test-python` covers compressed arrays, request conversion, serial and
+parallel batches, recoverable errors, uint64 seeds and paired comparisons.
+Tests check numerical implementation, not grid convergence or scientific
+superiority of either evolution.
 
 ## Kinetic request
 

@@ -1,0 +1,659 @@
+{
+  "provenance": {
+    "artifact": "d1_shared_state_20260913/main_b15.jsonl",
+    "sha256": "cf631de1de3449fa74300a480dcab26e7bf25a0d207bdbb3cc695faf84095dc0",
+    "description": "Unmodified artifact trajectories at step 50 or prior primary absorption; native Go backend. Route labels mapped to layer/evolution."
+  },
+  "cases": [
+    {
+      "request": {
+        "request_id": "random/low_rewiring",
+        "population": 500,
+        "opinion_bins": 15,
+        "out_degree": 15,
+        "recommendation_count": 10,
+        "max_steps": 50,
+        "workers": 1,
+        "major_cluster_mass": 0.02,
+        "terminal_position_resolution": 0.13333333333333333,
+        "terminal_mass_resolution": 0.002,
+        "dynamics": {
+          "influence": 0.046415888336127795,
+          "rewiring_rate": 0.001,
+          "tolerance": 0.45,
+          "type": "hk"
+        },
+        "recommender": {
+          "noise_quadrature_points": 9,
+          "noise_std": 0.0,
+          "opinion_tolerance": 0.4,
+          "random_ratio": 0.0,
+          "steepness": 1.0,
+          "type": "random"
+        },
+        "initial": {
+          "opinion_max": 1.0,
+          "opinion_min": -1.0,
+          "probabilities": {
+            "encoding": "base64+zlib+f64le",
+            "shape": "0",
+            "data": "eJwDAAAAAAE="
+          },
+          "type": "uniform"
+        },
+        "resolution": {
+          "score_max": 45,
+          "opinion_quadrature_points": 7,
+          "opinion_quadrature_rule": "unit_variance_quantile"
+        },
+        "closure": {
+          "motif_relaxation": 0.25
+        },
+        "variants": [
+          {
+            "layer": "naive",
+            "evolution": "deterministic"
+          },
+          {
+            "layer": "base",
+            "evolution": "deterministic"
+          },
+          {
+            "layer": "naive",
+            "evolution": "stochastic"
+          },
+          {
+            "layer": "base",
+            "evolution": "stochastic"
+          }
+        ],
+        "snapshots": {
+          "rho": true,
+          "edge": true,
+          "candidate": true,
+          "score": true,
+          "final_rho": true,
+          "final_edge": true,
+          "final_candidate": true,
+          "final_score": true,
+          "record_steps": {
+            "encoding": "base64+zlib+f64le",
+            "shape": "2",
+            "data": "eJxjYEAGng4AAOIAig=="
+          }
+        },
+        "seeds": [
+          {
+            "replicate": 0,
+            "init_seed": 202610630000,
+            "process_seed": 203510630000
+          },
+          {
+            "replicate": 1,
+            "init_seed": 202610630001,
+            "process_seed": 203510630001
+          }
+        ]
+      },
+      "expected": [
+        {
+          "layer": "naive",
+          "evolution": "deterministic",
+          "replicate": 0,
+          "initial_hash": "1342a80c1acacb20d03d27a222e2e2d1b99ea4f0a6676486f23f639ef6945508",
+          "steps": 50,
+          "rho": [
+            0.00022006272536181638,
+            0.004370183247839235,
+            0.04222281404479783,
+            0.1503880181294056,
+            0.1352281196920601,
+            0.052113947389870116,
+            0.04115132641086874,
+            0.03948892356461258,
+            0.06179167116208773,
+            0.1554497708326121,
+            0.20325041687382273,
+            0.08828507402551372,
+            0.02216258193949735,
+            0.003585898934175918,
+            0.0002911910274745172
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5403777395442,
+            871.2199753762967
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "deterministic",
+          "replicate": 0,
+          "initial_hash": "1342a80c1acacb20d03d27a222e2e2d1b99ea4f0a6676486f23f639ef6945508",
+          "steps": 50,
+          "rho": [
+            0.00022006272536181638,
+            0.004370183247839235,
+            0.04222281404479783,
+            0.1503880181294056,
+            0.1352281196920601,
+            0.052113947389870116,
+            0.04115132641086874,
+            0.03948892356461258,
+            0.06179167116208773,
+            0.1554497708326121,
+            0.20325041687382273,
+            0.08828507402551372,
+            0.02216258193949735,
+            0.003585898934175918,
+            0.0002911910274745172
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5403777395442,
+            871.523552877237
+          ]
+        },
+        {
+          "layer": "naive",
+          "evolution": "stochastic",
+          "replicate": 0,
+          "initial_hash": "1342a80c1acacb20d03d27a222e2e2d1b99ea4f0a6676486f23f639ef6945508",
+          "steps": 50,
+          "rho": [
+            0,
+            0.002,
+            0.046,
+            0.134,
+            0.102,
+            0.076,
+            0.082,
+            0.086,
+            0.066,
+            0.11,
+            0.146,
+            0.106,
+            0.042,
+            0.002,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5403777395442,
+            878.7121965018667
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "stochastic",
+          "replicate": 0,
+          "initial_hash": "1342a80c1acacb20d03d27a222e2e2d1b99ea4f0a6676486f23f639ef6945508",
+          "steps": 50,
+          "rho": [
+            0,
+            0.002,
+            0.046,
+            0.134,
+            0.102,
+            0.076,
+            0.082,
+            0.086,
+            0.066,
+            0.11,
+            0.146,
+            0.106,
+            0.042,
+            0.002,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5403777395442,
+            871.526310840826
+          ]
+        },
+        {
+          "layer": "naive",
+          "evolution": "deterministic",
+          "replicate": 1,
+          "initial_hash": "4fbaa09c812a9fbd5007352f35a8363a344fd2c5bfad8b3bc52af1f96b8f8f3f",
+          "steps": 50,
+          "rho": [
+            0.00021859989840647528,
+            0.0030991852047279832,
+            0.025226206850416447,
+            0.13730103386204995,
+            0.23420384861200735,
+            0.07521009713999238,
+            0.026557129682505322,
+            0.026543854061563645,
+            0.02237762692972037,
+            0.0649302463914888,
+            0.2064435882757936,
+            0.1475656179820747,
+            0.026753409959050952,
+            0.0033089486639759557,
+            0.00026060648622567293
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5797360664747,
+            871.2556984047707
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "deterministic",
+          "replicate": 1,
+          "initial_hash": "4fbaa09c812a9fbd5007352f35a8363a344fd2c5bfad8b3bc52af1f96b8f8f3f",
+          "steps": 50,
+          "rho": [
+            0.00021859989840647528,
+            0.0030991852047279832,
+            0.025226206850416447,
+            0.13730103386204995,
+            0.23420384861200735,
+            0.07521009713999238,
+            0.026557129682505322,
+            0.026543854061563645,
+            0.02237762692972037,
+            0.0649302463914888,
+            0.2064435882757936,
+            0.1475656179820747,
+            0.026753409959050952,
+            0.0033089486639759557,
+            0.00026060648622567293
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5797360664747,
+            871.5635517899627
+          ]
+        },
+        {
+          "layer": "naive",
+          "evolution": "stochastic",
+          "replicate": 1,
+          "initial_hash": "4fbaa09c812a9fbd5007352f35a8363a344fd2c5bfad8b3bc52af1f96b8f8f3f",
+          "steps": 50,
+          "rho": [
+            0,
+            0.002,
+            0.024,
+            0.144,
+            0.192,
+            0.09,
+            0.022,
+            0.012,
+            0.032,
+            0.068,
+            0.274,
+            0.124,
+            0.016,
+            0,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5797360664747,
+            876.327770752088
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "stochastic",
+          "replicate": 1,
+          "initial_hash": "4fbaa09c812a9fbd5007352f35a8363a344fd2c5bfad8b3bc52af1f96b8f8f3f",
+          "steps": 50,
+          "rho": [
+            0,
+            0.002,
+            0.024,
+            0.144,
+            0.192,
+            0.09,
+            0.022,
+            0.012,
+            0.032,
+            0.068,
+            0.274,
+            0.124,
+            0.016,
+            0,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            871.5797360664747,
+            871.5789891811512
+          ]
+        }
+      ]
+    },
+    {
+      "request": {
+        "request_id": "structure_random_zeta4/balanced",
+        "population": 500,
+        "opinion_bins": 15,
+        "out_degree": 15,
+        "recommendation_count": 10,
+        "max_steps": 50,
+        "workers": 1,
+        "major_cluster_mass": 0.02,
+        "terminal_position_resolution": 0.13333333333333333,
+        "terminal_mass_resolution": 0.002,
+        "dynamics": {
+          "influence": 0.046415888336127795,
+          "rewiring_rate": 0.046415888336127795,
+          "tolerance": 0.45,
+          "type": "hk"
+        },
+        "recommender": {
+          "noise_quadrature_points": 9,
+          "noise_std": 0.0,
+          "opinion_tolerance": 0.4,
+          "random_ratio": 0.0,
+          "steepness": 4.0,
+          "type": "structure_random"
+        },
+        "initial": {
+          "opinion_max": 1.0,
+          "opinion_min": -1.0,
+          "probabilities": {
+            "encoding": "base64+zlib+f64le",
+            "shape": "0",
+            "data": "eJwDAAAAAAE="
+          },
+          "type": "uniform"
+        },
+        "resolution": {
+          "score_max": 45,
+          "opinion_quadrature_points": 7,
+          "opinion_quadrature_rule": "unit_variance_quantile"
+        },
+        "closure": {
+          "motif_relaxation": 0.25
+        },
+        "variants": [
+          {
+            "layer": "naive",
+            "evolution": "deterministic"
+          },
+          {
+            "layer": "base",
+            "evolution": "deterministic"
+          },
+          {
+            "layer": "naive",
+            "evolution": "stochastic"
+          },
+          {
+            "layer": "base",
+            "evolution": "stochastic"
+          }
+        ],
+        "snapshots": {
+          "rho": true,
+          "edge": true,
+          "candidate": true,
+          "score": true,
+          "final_rho": true,
+          "final_edge": true,
+          "final_candidate": true,
+          "final_score": true,
+          "record_steps": {
+            "encoding": "base64+zlib+f64le",
+            "shape": "2",
+            "data": "eJxjYEAGng4AAOIAig=="
+          }
+        },
+        "seeds": [
+          {
+            "replicate": 0,
+            "init_seed": 202610630000,
+            "process_seed": 203510630000
+          },
+          {
+            "replicate": 1,
+            "init_seed": 202610630001,
+            "process_seed": 203510630001
+          }
+        ]
+      },
+      "expected": [
+        {
+          "layer": "naive",
+          "evolution": "deterministic",
+          "replicate": 0,
+          "initial_hash": "1967dd890bc5999d7a61cddddffa2a28aff3f60f2972cc5c54d2da566648866e",
+          "steps": 50,
+          "rho": [
+            0.00021811310874006814,
+            0.004488287125504964,
+            0.044535911496417294,
+            0.1546641816389971,
+            0.1253863862365458,
+            0.04825712623089802,
+            0.043562990857304175,
+            0.04279556391464292,
+            0.06948115915472086,
+            0.1572406610294592,
+            0.19390740578292825,
+            0.08826563950046828,
+            0.0231409599671208,
+            0.0037632996291671133,
+            0.0002923143270849653
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33987.019116205665,
+            34303.23731999437
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "deterministic",
+          "replicate": 0,
+          "initial_hash": "1967dd890bc5999d7a61cddddffa2a28aff3f60f2972cc5c54d2da566648866e",
+          "steps": 50,
+          "rho": [
+            0.00022250911764499202,
+            0.0045544797776511416,
+            0.04474280880189729,
+            0.15399838373268732,
+            0.12668079484434225,
+            0.04960919098091863,
+            0.04324465073026506,
+            0.042674848682441965,
+            0.06789309551065073,
+            0.15319601736084923,
+            0.19418740581533608,
+            0.09086462036385023,
+            0.0239374046743234,
+            0.003894451232605256,
+            0.0002993383745366534
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33987.019116205665,
+            33987.13881376634
+          ]
+        },
+        {
+          "layer": "naive",
+          "evolution": "stochastic",
+          "replicate": 0,
+          "initial_hash": "1967dd890bc5999d7a61cddddffa2a28aff3f60f2972cc5c54d2da566648866e",
+          "steps": 50,
+          "rho": [
+            0,
+            0.004,
+            0.032,
+            0.114,
+            0.174,
+            0.09,
+            0.034,
+            0.048,
+            0.074,
+            0.056,
+            0.15,
+            0.14,
+            0.072,
+            0.012,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33987.019116205665,
+            41553.680945362
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "stochastic",
+          "replicate": 0,
+          "initial_hash": "1967dd890bc5999d7a61cddddffa2a28aff3f60f2972cc5c54d2da566648866e",
+          "steps": 50,
+          "rho": [
+            0,
+            0.006,
+            0.032,
+            0.104,
+            0.128,
+            0.09,
+            0.088,
+            0.072,
+            0.092,
+            0.102,
+            0.154,
+            0.094,
+            0.03,
+            0.006,
+            0.002
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33987.019116205665,
+            34255.78542037794
+          ]
+        },
+        {
+          "layer": "naive",
+          "evolution": "deterministic",
+          "replicate": 1,
+          "initial_hash": "8978475546cb4cb742b7a9cc37684c9c413b61da8c9c00b7955590c613bfec02",
+          "steps": 50,
+          "rho": [
+            0.00021881893002732562,
+            0.0032131812545159693,
+            0.026554019777122996,
+            0.14379590535715536,
+            0.23229316633116007,
+            0.07063178454242613,
+            0.026676383055167504,
+            0.026797857917577945,
+            0.021918448834116755,
+            0.05922370637022564,
+            0.20129963658497177,
+            0.15516121743320055,
+            0.028505362440391455,
+            0.003455433016550369,
+            0.000255078155390175
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33997.06524335159,
+            34186.416563842846
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "deterministic",
+          "replicate": 1,
+          "initial_hash": "8978475546cb4cb742b7a9cc37684c9c413b61da8c9c00b7955590c613bfec02",
+          "steps": 50,
+          "rho": [
+            0.00022415492875848034,
+            0.0033293015850786793,
+            0.027415841393399042,
+            0.1467274264896872,
+            0.2283343701056577,
+            0.07025136010310798,
+            0.026787763021961956,
+            0.0267413343525328,
+            0.022083016182388896,
+            0.05925378444231618,
+            0.19826577651901778,
+            0.1575022711215551,
+            0.02926591993451251,
+            0.003556468931298208,
+            0.00026121088872744033
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33997.06524335159,
+            33990.41027269858
+          ]
+        },
+        {
+          "layer": "naive",
+          "evolution": "stochastic",
+          "replicate": 1,
+          "initial_hash": "8978475546cb4cb742b7a9cc37684c9c413b61da8c9c00b7955590c613bfec02",
+          "steps": 50,
+          "rho": [
+            0,
+            0.006,
+            0.056,
+            0.25,
+            0.142,
+            0.022,
+            0.01,
+            0.002,
+            0.018,
+            0.072,
+            0.26,
+            0.148,
+            0.012,
+            0.002,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33997.06524335159,
+            35573.0207250306
+          ]
+        },
+        {
+          "layer": "base",
+          "evolution": "stochastic",
+          "replicate": 1,
+          "initial_hash": "8978475546cb4cb742b7a9cc37684c9c413b61da8c9c00b7955590c613bfec02",
+          "steps": 50,
+          "rho": [
+            0,
+            0.002,
+            0.028,
+            0.128,
+            0.266,
+            0.07,
+            0.002,
+            0.018,
+            0.022,
+            0.028,
+            0.206,
+            0.204,
+            0.024,
+            0.002,
+            0
+          ],
+          "point_hit": null,
+          "snapshot_score_sum": [
+            33997.06524335159,
+            34118.2858102358
+          ]
+        }
+      ]
+    }
+  ]
+}

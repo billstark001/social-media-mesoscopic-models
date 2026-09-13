@@ -121,15 +121,16 @@ def _streaming_batch(
     assert process.stdin is not None
     assert process.stdout is not None
     assert process.stderr is not None
+    stdout, stderr = process.stdout, process.stderr
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
     callback_errors: list[Exception] = []
 
     def read_stdout() -> None:
-        stdout_lines.extend(process.stdout)
+        stdout_lines.extend(stdout)
 
     def read_stderr() -> None:
-        for line in process.stderr:
+        for line in stderr:
             stderr_lines.append(line)
             if callback_errors:
                 continue
@@ -245,13 +246,14 @@ def run_parallel_processes(
         assert process.stdin is not None
         assert process.stdout is not None
         assert process.stderr is not None
+        stderr = process.stderr
         errors: list[Exception] = []
         stderr_lines: list[str] = []
         local_to_global: dict[int, int] = {}
         mapping_lock = threading.Lock()
 
         def read_progress() -> None:
-            for line in process.stderr:
+            for line in stderr:
                 stderr_lines.append(line)
                 if progress is None or errors:
                     continue

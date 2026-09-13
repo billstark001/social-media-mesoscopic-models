@@ -1,4 +1,4 @@
-.PHONY: build build-lifted build-kinetic build-all install-python test test-python benchmark fmt clean
+.PHONY: build build-lifted build-kinetic build-transfer build-all install-python test test-python benchmark fmt clean
 
 GO ?= go
 PYTHON ?= python
@@ -17,7 +17,11 @@ build-kinetic:
 	mkdir -p $(BIN_DIR)
 	$(GO) build $(GO_BUILD_FLAGS) -o $(BIN_DIR)/smp-kinetic ./cmd/smp-kinetic
 
-build-all: build-lifted build-kinetic
+build-transfer:
+	mkdir -p $(BIN_DIR)
+	$(GO) build $(GO_BUILD_FLAGS) -o $(BIN_DIR)/smp-transfer ./cmd/smp-transfer
+
+build-all: build-lifted build-kinetic build-transfer
 
 install-python:
 	$(PYTHON) -m pip install -e .
@@ -37,3 +41,4 @@ fmt:
 clean:
 	$(RM) $(BIN_DIR)/smp-lifted $(BIN_DIR)/smp-lifted.exe
 	$(RM) $(BIN_DIR)/smp-kinetic $(BIN_DIR)/smp-kinetic.exe
+	$(RM) $(BIN_DIR)/smp-transfer $(BIN_DIR)/smp-transfer.exe
