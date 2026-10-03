@@ -153,6 +153,35 @@ func InitialState(request config.RunRequest, layer Layer, profile ClosureProfile
 	return state, nil
 }
 
+// FromProjected installs a binned microscopic snapshot in the naive or base
+// closure. Edge rows must already satisfy the fixed-degree constraint. C is
+// reconstructed from rho/E; base retains the supplied candidate-weighted
+// score, while naive reconstructs its independent-edge/Poisson target.
+func FromProjected(request config.RunRequest, layer Layer, rho, edge, score []float64,
+	profile ClosureProfile) (*State, error) {
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	if layer != LayerNaive && layer != LayerBase {
+		return nil, fmt.Errorf("projected state supports naive and base only")
+	}
+	s := newEmptyState(request, layer)
+	if len(rho) != len(s.Rho) || len(edge) != len(s.Edge) || (layer == LayerBase && len(score) != len(s.Score)) {
+		return nil, fmt.Errorf("projected coordinate shape mismatch")
+	}
+	copy(s.Rho, rho)
+	copy(s.Edge, edge)
+	s.rebuildCandidate()
+	s.rebuildScoreState(profile.ScoreAvailability)
+	if layer == LayerBase {
+		copy(s.Score, score)
+	}
+	if err := s.Validate(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 func (s *State) neighborKernel() []float64 {
 	result := make([]float64, len(s.Edge))
 	for i := 0; i < s.Bins; i++ {
