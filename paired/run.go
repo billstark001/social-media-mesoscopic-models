@@ -12,6 +12,7 @@ import (
 	"smp-meso/numerics"
 	"smp-meso/protocol"
 	"smp-meso/terminal"
+	"smp-meso/trajectory"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -196,57 +197,58 @@ func runPath(snapshots SnapshotsConfig, steps []int, request config.RunRequest, 
 	hash := sha256.Sum256(initial)
 	result := PathResult{Variant: variant, Seed: seed, InitialHash: hex.EncodeToString(hash[:]), Category: "censored"}
 	rng := rand.New(rand.NewPCG(seed.ProcessSeed, seed.ProcessSeed^0xbeef))
-	primary := terminal.Options{Epsilon: request.Dynamics.Tolerance, OccupiedMass: .5 / float64(request.Population),
-		MajorMass: request.MajorClusterMass, PositionResolution: request.TerminalPositionResolution,
-		MassResolution: request.TerminalMassResolution}
+	primary := trajectory.TerminalOptions(request)
 	point := primary
 	point.PositionResolution, point.MassResolution = 0, 0
 	collector := newSnapshotCollector(snapshots, steps)
 	// Resolve evolution once. Both routes use the same zero closure profile and
 	// unsplit law; no stochastic fast-slow or interval controls are silently ignored.
-	advance := func() (float64, error) { return lifted.DeterministicStep(state, request) }
+	advance := func(state *lifted.State, _ *rand.Rand) (lifted.StepDiagnostics, error) {
+		change, err := lifted.DeterministicStep(state, request)
+		return lifted.StepDiagnostics{MaxRhoChange: change}, err
+	}
 	if variant.Evolution == Stochastic {
-		advance = func() (float64, error) {
-			diagnostics, err := lifted.Step(state, request, lifted.ClosureProfile{}, rng)
-			return diagnostics.MaxRhoChange, err
+		advance = func(state *lifted.State, rng *rand.Rand) (lifted.StepDiagnostics, error) {
+			return lifted.Step(state, request, lifted.ClosureProfile{}, rng)
 		}
 	}
-	for step := 0; ; step++ {
-		change := 0.0
-		if step > 0 {
-			change, err = advance()
-			if err != nil {
-				return PathResult{}, fmt.Errorf("step %d: %w", step, err)
-			}
-		}
-		result.Steps = step
+	cursor, err := trajectory.New(state, rng, 0)
+	if err != nil {
+		return PathResult{}, err
+	}
+	observe := func(current trajectory.Point) (bool, error) {
+		state := current.State
+		result.Steps = current.Step
 		result.MaxMassError = math.Max(result.MaxMassError, math.Abs(numerics.Sum(state.Rho)-1))
 		for i, mass := range state.Rho {
 			residual := numerics.Sum(state.Edge[i*state.Bins:(i+1)*state.Bins]) - float64(state.Degree)*mass
 			result.MaxRowError = math.Max(result.MaxRowError, math.Abs(residual))
 		}
-		collector.record(step, state, change)
-		result.FinalPoint, err = terminal.Classify(state.Axis, state.Rho, point)
-		if err != nil {
-			return PathResult{}, err
+		collector.record(current.Step, state, current.Diagnostics.MaxRhoChange)
+		finalPoint, classifyErr := terminal.Classify(state.Axis, state.Rho, point)
+		if classifyErr != nil {
+			return false, classifyErr
 		}
+		result.FinalPoint = finalPoint
 		if result.PointHit == nil && result.FinalPoint.Status == terminal.StatusAbsorbed {
-			result.PointHit = &Hit{Step: step, Category: result.FinalPoint.Category}
+			result.PointHit = &Hit{Step: current.Step, Category: result.FinalPoint.Category}
 		}
-		result.FinalPrimary, err = terminal.Classify(state.Axis, state.Rho, primary)
-		if err != nil {
-			return PathResult{}, err
+		finalPrimary, classifyErr := terminal.Classify(state.Axis, state.Rho, primary)
+		if classifyErr != nil {
+			return false, classifyErr
 		}
-		if heartbeat != nil && progressStepInterval > 0 && step > 0 && step%progressStepInterval == 0 {
-			heartbeat(step)
+		result.FinalPrimary = finalPrimary
+		if heartbeat != nil && progressStepInterval > 0 && current.Step > 0 && current.Step%progressStepInterval == 0 {
+			heartbeat(current.Step)
 		}
 		if result.FinalPrimary.Status == terminal.StatusAbsorbed {
 			result.Category = result.FinalPrimary.Category
-			break
+			return true, nil
 		}
-		if step == request.MaxSteps {
-			break
-		}
+		return false, nil
+	}
+	if err := cursor.Continue(request.MaxSteps, advance, observe); err != nil {
+		return PathResult{}, err
 	}
 	result.Status = result.FinalPrimary.Status
 	result.Snapshots, err = collector.encode(state)

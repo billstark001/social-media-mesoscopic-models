@@ -4,6 +4,7 @@ import (
 	"smp-meso/config"
 	"smp-meso/lifted"
 	"smp-meso/terminal"
+	"smp-meso/trajectory"
 )
 
 var Categories = []string{"k1", "k2", "k3", "k4plus", "censored"}
@@ -24,13 +25,7 @@ func categoryIndex(clusterCount int) int {
 // terminalCategory applies the common measure-level classifier. Ambiguous or
 // nonterminal states continue until a later step or are censored at the horizon.
 func terminalCategory(state *lifted.State, request config.RunRequest) (int, bool, error) {
-	result, err := terminal.Classify(state.Axis, state.Rho, terminal.Options{
-		Epsilon:            request.Dynamics.Tolerance,
-		OccupiedMass:       0.5 / float64(state.Population),
-		MajorMass:          request.MajorClusterMass,
-		PositionResolution: request.TerminalPositionResolution,
-		MassResolution:     request.TerminalMassResolution,
-	})
+	result, err := terminal.Classify(state.Axis, state.Rho, trajectory.TerminalOptions(request))
 	if err != nil {
 		return 0, false, err
 	}

@@ -15,6 +15,8 @@ no `internal` tree):
 - `numerics`: probability utilities, canonical sparse/dense transport,
   batched contractions, and reusable tridiagonal factorizations;
 - `lifted`: the six nested retained states, unsplit law, and conditional fast-absorption law;
+- `trajectory`: single-path advancement from an existing lifted state and process
+  RNG, with caller-defined observation and stopping;
 - `ensemble`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
 - `paired`: paired terminal experiments, path provenance, and selected state snapshots;
@@ -27,6 +29,11 @@ no `internal` tree):
 The Python package `smp_meso_bindings` builds and orchestrates the Go binary.
 It sends all parameter points in one JSONL stream, so a scan does not create a
 new process for every point.
+
+`trajectory.Cursor` can extend an in-memory path from its current state and
+process RNG without repeating the current observation. It does not serialize
+checkpoints; restarting a stochastic path from its seed alone would replay the
+random stream rather than resume it.
 
 ## Retained-state ladder
 

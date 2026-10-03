@@ -6,6 +6,7 @@ import (
 	"smp-meso/config"
 	"smp-meso/lifted"
 	"smp-meso/protocol"
+	"smp-meso/trajectory"
 	"sync"
 	"sync/atomic"
 )
@@ -59,51 +60,48 @@ func runPath(
 	if err != nil {
 		return PathOutcome{}, err
 	}
-	if category, terminal, err := terminalCategory(state, request); err != nil {
+	cursor, err := trajectory.New(state, rng, 0)
+	if err != nil {
 		return PathOutcome{}, err
-	} else if terminal {
-		return PathOutcome{Category: category, StateDimension: state.Dimension()}, nil
 	}
-	rewiringEvents := 0
-	fastSubsteps := 0
-	fastRewiringEvents := 0
-	fastMaxHits := 0
-	fastSlowApplied := false
-	finalFastResidual := 0.0
-	for step := 1; step <= request.MaxSteps; step++ {
-		diagnostics, err := lifted.FastSlowStep(state, request, profile, rng)
+	outcome := PathOutcome{StateDimension: state.Dimension()}
+	advance := func(state *lifted.State, rng *rand.Rand) (lifted.StepDiagnostics, error) {
+		return lifted.FastSlowStep(state, request, profile, rng)
+	}
+	observe := func(point trajectory.Point) (bool, error) {
+		if point.Step > 0 {
+			diagnostics := point.Diagnostics
+			outcome.RewiringEvents += diagnostics.RewiringEvents
+			outcome.FastSubsteps += diagnostics.FastSubsteps
+			outcome.FastRewiringEvents += diagnostics.FastRewiringEvents
+			if diagnostics.FastMaxHit {
+				outcome.FastMaxHits++
+			}
+			outcome.FastSlowApplied = outcome.FastSlowApplied || diagnostics.FastSlowApplied
+			outcome.FinalFastResidual = diagnostics.FastResidualIntensity
+			if progressStepInterval > 0 && point.Step%progressStepInterval == 0 && onStep != nil {
+				onStep(point.Step)
+			}
+		}
+		category, done, err := terminalCategory(point.State, request)
 		if err != nil {
-			return PathOutcome{}, fmt.Errorf("step %d: %w", step, err)
+			if point.Step == 0 {
+				return false, err
+			}
+			return false, fmt.Errorf("classify terminal state at step %d: %w", point.Step, err)
 		}
-		rewiringEvents += diagnostics.RewiringEvents
-		fastSubsteps += diagnostics.FastSubsteps
-		fastRewiringEvents += diagnostics.FastRewiringEvents
-		if diagnostics.FastMaxHit {
-			fastMaxHits++
+		if done {
+			outcome.Category, outcome.Steps = category, point.Step
 		}
-		fastSlowApplied = fastSlowApplied || diagnostics.FastSlowApplied
-		finalFastResidual = diagnostics.FastResidualIntensity
-		if progressStepInterval > 0 && step%progressStepInterval == 0 && onStep != nil {
-			onStep(step)
-		}
-		if category, terminal, err := terminalCategory(state, request); err != nil {
-			return PathOutcome{}, fmt.Errorf("classify terminal state at step %d: %w", step, err)
-		} else if terminal {
-			return PathOutcome{
-				Category: category, Steps: step, RewiringEvents: rewiringEvents,
-				StateDimension: state.Dimension(), FastSlowApplied: fastSlowApplied,
-				FastSubsteps: fastSubsteps, FastRewiringEvents: fastRewiringEvents,
-				FastMaxHits: fastMaxHits, FinalFastResidual: finalFastResidual,
-			}, nil
-		}
+		return done, nil
 	}
-	return PathOutcome{
-		Category: len(Categories) - 1, Steps: request.MaxSteps,
-		RewiringEvents: rewiringEvents, StateDimension: state.Dimension(),
-		FastSlowApplied: fastSlowApplied, FastSubsteps: fastSubsteps,
-		FastRewiringEvents: fastRewiringEvents, FastMaxHits: fastMaxHits,
-		FinalFastResidual: finalFastResidual,
-	}, nil
+	if err := cursor.Continue(request.MaxSteps, advance, observe); err != nil {
+		return PathOutcome{}, err
+	}
+	if !cursor.Stopped() {
+		outcome.Category, outcome.Steps = len(Categories)-1, cursor.Step()
+	}
+	return outcome, nil
 }
 
 func runEnsembleWithProgress(
