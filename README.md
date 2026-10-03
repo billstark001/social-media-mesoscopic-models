@@ -15,7 +15,7 @@ no `internal` tree):
 - `numerics`: probability utilities, canonical sparse/dense transport,
   batched contractions, and reusable tridiagonal factorizations;
 - `lifted`: the six nested retained states, unsplit law, and conditional fast-absorption law;
-- `solver`: lifted path ensembles, absorbing terminal categories, and uncertainty
+- `ensemble`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
 - `transfer`: paired terminal experiments, path provenance, and selected state snapshots;
 - `kinetic`: nonlocal measure and finite-volume Fokker--Planck dynamics;

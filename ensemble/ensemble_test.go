@@ -1,4 +1,4 @@
-package solver
+package ensemble
 
 import (
 	"math"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func solverRequest() config.RunRequest {
+func ensembleRequest() config.RunRequest {
 	return config.RunRequest{
 		RequestID: "solver", Layer: "base", Population: 40, OpinionBins: 5,
 		OutDegree: 3, RecommendationCount: 2, MaxSteps: 4,
@@ -29,7 +29,7 @@ func solverRequest() config.RunRequest {
 }
 
 func TestResultNormalizesAndIntervalContainsPoint(t *testing.T) {
-	result, err := Run(solverRequest())
+	result, err := Run(ensembleRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,12 +51,12 @@ func TestResultNormalizesAndIntervalContainsPoint(t *testing.T) {
 }
 
 func TestRunValidatesProgrammaticRequestsAndNormalizesEnums(t *testing.T) {
-	invalid := solverRequest()
+	invalid := ensembleRequest()
 	invalid.Workers = 0
 	if _, err := Run(invalid); err == nil {
 		t.Fatal("programmatic request bypassed validation")
 	}
-	request := solverRequest()
+	request := ensembleRequest()
 	request.Dynamics.Type = " HK "
 	request.Recommender.Type = " Opinion_Random "
 	request.Initial.Type = " Uniform "
@@ -66,7 +66,7 @@ func TestRunValidatesProgrammaticRequestsAndNormalizesEnums(t *testing.T) {
 }
 
 func TestRetainedLayersRemoveAmbiguityCoordinates(t *testing.T) {
-	request := solverRequest()
+	request := ensembleRequest()
 	previous := 6
 	for layer := config.LayerBase; layer <= config.LayerTopology; layer++ {
 		count := len(activeCoordinates(request, layer))
@@ -78,7 +78,7 @@ func TestRetainedLayersRemoveAmbiguityCoordinates(t *testing.T) {
 }
 
 func TestNaiveAndFastSlowDiagnostics(t *testing.T) {
-	request := solverRequest()
+	request := ensembleRequest()
 	request.Layer = "naive"
 	request.FastSlow.Mode = "conditional_absorption"
 	request.FastSlow.RatioThreshold = 1
@@ -101,7 +101,7 @@ func TestNaiveAndFastSlowDiagnostics(t *testing.T) {
 }
 
 func TestProgressDoesNotChangeNumericalResult(t *testing.T) {
-	request := solverRequest()
+	request := ensembleRequest()
 	quiet, err := Run(request)
 	if err != nil {
 		t.Fatal(err)
