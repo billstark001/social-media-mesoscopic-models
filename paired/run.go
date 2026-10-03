@@ -1,4 +1,4 @@
-package transfer
+package paired
 
 import (
 	"crypto/sha256"

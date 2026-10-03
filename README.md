@@ -17,7 +17,7 @@ no `internal` tree):
 - `lifted`: the six nested retained states, unsplit law, and conditional fast-absorption law;
 - `ensemble`: lifted path ensembles, absorbing terminal categories, and uncertainty
   envelopes;
-- `transfer`: paired terminal experiments, path provenance, and selected state snapshots;
+- `paired`: paired terminal experiments, path provenance, and selected state snapshots;
 - `kinetic`: nonlocal measure and finite-volume Fokker--Planck dynamics;
 - `kinetic/statistics`: requested-only online density observables;
 - `protocol`: recoverable JSONL batch transport;

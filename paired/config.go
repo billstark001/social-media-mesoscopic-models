@@ -1,6 +1,6 @@
-// Package transfer runs paired deterministic and stochastic terminal experiments
+// Package paired runs paired deterministic and stochastic terminal experiments
 // on the same finite-exposure lifted kernels and explicit initial-state seeds.
-package transfer
+package paired
 
 import (
 	"bytes"
