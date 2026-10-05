@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"smp-meso/config"
 	"smp-meso/numerics"
+	"smp-meso/protocol"
 	"strings"
 )
 
@@ -153,17 +154,21 @@ func InitialState(request config.RunRequest, layer Layer, profile ClosureProfile
 	return state, nil
 }
 
-// FromProjected installs a binned microscopic snapshot in the naive or base
+// FromProjected installs a compressed node/edge projection in the naive or base
 // closure. Edge rows must already satisfy the fixed-degree constraint. C is
 // reconstructed from rho/E; base retains the supplied candidate-weighted
 // score, while naive reconstructs its independent-edge/Poisson target.
-func FromProjected(request config.RunRequest, layer Layer, rho, edge, score []float64,
+func FromProjected(request config.RunRequest, layer Layer, projection protocol.NodeEdgeProjection, score []float64,
 	profile ClosureProfile) (*State, error) {
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
 	if layer != LayerNaive && layer != LayerBase {
 		return nil, fmt.Errorf("projected state supports naive and base only")
+	}
+	rho, edge, err := projection.Decode(request.OpinionBins)
+	if err != nil {
+		return nil, err
 	}
 	s := newEmptyState(request, layer)
 	if len(rho) != len(s.Rho) || len(edge) != len(s.Edge) || (layer == LayerBase && len(score) != len(s.Score)) {

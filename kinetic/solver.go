@@ -185,7 +185,7 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 		return Result{}, err
 	}
 	recommend := planRecommender(request)
-	advanceOpinion := planOpinionEvolution(request, grid)
+	advanceOpinion := planOpinionEvolution(request, grid, request.Dt)
 	measure := statisticsPlan(request, grid)
 	snapshots, err := newSnapshotCollector(request, grid.Axis)
 	if err != nil {
@@ -218,17 +218,7 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 				return Result{}, fmt.Errorf("snapshot at step %d: %w", step-1, err)
 			}
 		}
-		for index := range workspace.edgeRewired {
-			workspace.edgeRewired[index] = current.Edge[index] + request.Dt*values.RewiringFlux[index]
-			if workspace.edgeRewired[index] < 0 && workspace.edgeRewired[index] > -1e-12 {
-				workspace.edgeRewired[index] = 0
-			}
-		}
-		current.plan.rewire(current, current.Edge, workspace.edgeRewired)
-		if err := advanceOpinion(current, values, workspace.edgeRewired, workspace); err != nil {
-			return Result{}, fmt.Errorf("step %d opinion evolution: %w", step, err)
-		}
-		if err := current.validate(); err != nil {
+		if err := applyKineticStep(current, request, values, advanceOpinion, workspace, nil); err != nil {
 			return Result{}, fmt.Errorf("step %d: %w", step, err)
 		}
 		measure.ObservePathway(current.Rho, current.Edge)
@@ -291,4 +281,26 @@ func RunWithProgress(request RunRequest, progressStepInterval int, progress prot
 	}
 	emit(protocol.ProgressEvent{Event: "request_completed", Step: executedSteps, StateDimension: dimension})
 	return result, nil
+}
+
+// applyKineticStep is shared by ordinary runs and state-inspection trajectories.
+// The optional observer sees the rewired field before endpoint transport.
+func applyKineticStep(current *state, request RunRequest, values fields, advanceOpinion opinionEvolution, workspace *stepWorkspace, onRewire func([]float64)) error {
+	for index := range workspace.edgeRewired {
+		workspace.edgeRewired[index] = current.Edge[index] + request.Dt*values.RewiringFlux[index]
+		if workspace.edgeRewired[index] < 0 && workspace.edgeRewired[index] > -1e-12 {
+			workspace.edgeRewired[index] = 0
+		}
+	}
+	if onRewire != nil {
+		onRewire(workspace.edgeRewired)
+	}
+	current.plan.rewire(current, current.Edge, workspace.edgeRewired)
+	if err := advanceOpinion(current, values, workspace.edgeRewired, workspace); err != nil {
+		return fmt.Errorf("opinion evolution: %w", err)
+	}
+	if err := current.validate(); err != nil {
+		return err
+	}
+	return nil
 }

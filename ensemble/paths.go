@@ -60,7 +60,7 @@ func runPath(
 	if err != nil {
 		return PathOutcome{}, err
 	}
-	cursor, err := trajectory.New(state, rng, 0)
+	cursor, err := trajectory.New[lifted.State, lifted.StepDiagnostics](state, rng, 0)
 	if err != nil {
 		return PathOutcome{}, err
 	}
@@ -68,7 +68,7 @@ func runPath(
 	advance := func(state *lifted.State, rng *rand.Rand) (lifted.StepDiagnostics, error) {
 		return lifted.FastSlowStep(state, request, profile, rng)
 	}
-	observe := func(point trajectory.Point) (bool, error) {
+	observe := func(point trajectory.Point[lifted.State, lifted.StepDiagnostics]) (bool, error) {
 		if point.Step > 0 {
 			diagnostics := point.Diagnostics
 			outcome.RewiringEvents += diagnostics.RewiringEvents

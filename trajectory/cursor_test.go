@@ -17,12 +17,12 @@ func TestContinuePreservesStateRandomStreamAndObservationOrder(t *testing.T) {
 	run := func(split bool) ([]sample, float64, uint64) {
 		rng := rand.New(rand.NewPCG(17, 23))
 		state := &lifted.State{Rho: []float64{0}}
-		cursor, err := New(state, rng, 0)
+		cursor, err := New[lifted.State, lifted.StepDiagnostics](state, rng, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		observed := []sample{}
-		observe := func(point Point) (bool, error) {
+		observe := func(point Point[lifted.State, lifted.StepDiagnostics]) (bool, error) {
 			observed = append(observed, sample{point.Step, int(point.State.Rho[0]), point.Diagnostics.RewiringEvents})
 			return false, nil
 		}
@@ -52,12 +52,12 @@ func TestContinuePreservesStateRandomStreamAndObservationOrder(t *testing.T) {
 
 func TestInitialStopDoesNotAdvanceOrRepeatObservation(t *testing.T) {
 	state := &lifted.State{Rho: []float64{1}}
-	cursor, err := New(state, nil, 8)
+	cursor, err := New[lifted.State, lifted.StepDiagnostics](state, nil, 8)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observations := 0
-	stop := func(point Point) (bool, error) {
+	stop := func(point Point[lifted.State, lifted.StepDiagnostics]) (bool, error) {
 		observations++
 		if point.Step != 8 {
 			t.Fatalf("observed step %d", point.Step)

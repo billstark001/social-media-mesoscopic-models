@@ -212,11 +212,11 @@ func runPath(snapshots SnapshotsConfig, steps []int, request config.RunRequest, 
 			return lifted.Step(state, request, lifted.ClosureProfile{}, rng)
 		}
 	}
-	cursor, err := trajectory.New(state, rng, 0)
+	cursor, err := trajectory.New[lifted.State, lifted.StepDiagnostics](state, rng, 0)
 	if err != nil {
 		return PathResult{}, err
 	}
-	observe := func(current trajectory.Point) (bool, error) {
+	observe := func(current trajectory.Point[lifted.State, lifted.StepDiagnostics]) (bool, error) {
 		state := current.State
 		result.Steps = current.Step
 		result.MaxMassError = math.Max(result.MaxMassError, math.Abs(numerics.Sum(state.Rho)-1))

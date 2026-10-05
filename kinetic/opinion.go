@@ -47,7 +47,7 @@ func constantDiffusionSystem(request RunRequest, grid *gridGeometry) (*numerics.
 	return fokkerPlanckSystem(make([]float64, request.OpinionBins), diffusion, grid.Dx, request.Dt)
 }
 
-func planOpinionEvolution(request RunRequest, grid *gridGeometry) opinionEvolution {
+func planOpinionEvolution(request RunRequest, grid *gridGeometry, physicalStep float64) opinionEvolution {
 	if normalize(request.Dynamics.OpinionMethod) == "measure" {
 		buildTransition := planMeasureTransition(request)
 		var background *numerics.TridiagonalSystem
@@ -83,7 +83,7 @@ func planOpinionEvolution(request RunRequest, grid *gridGeometry) opinionEvoluti
 		for index := range velocity {
 			velocity[index] = request.Dynamics.Influence * moments.Mean[index]
 			diffusion[index] = request.NoiseDiffusion +
-				0.5*request.Dt*request.Dynamics.Influence*request.Dynamics.Influence*moments.Second[index]
+				0.5*physicalStep*request.Dynamics.Influence*request.Dynamics.Influence*moments.Second[index]
 			if !isFiniteNonnegative(diffusion[index]) || math.IsNaN(velocity[index]) || math.IsInf(velocity[index], 0) {
 				return fmt.Errorf("invalid Fokker-Planck coefficient at cell %d", index)
 			}
